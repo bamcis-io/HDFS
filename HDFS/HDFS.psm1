@@ -97,6 +97,10 @@ Function Get-HDFSItem {
 		[Parameter(ParameterSetName = "Open")]
 		[Switch]$Open,
 
+		[Parameter(ParameterSetName = "Open")]
+		[ValidateNotNull()]
+		[System.Text.Encoding]$Encoding,
+
 		[Parameter()]
 		[ValidateScript({
 			$script:Sessions.ContainsKey($_.ToLower())
@@ -146,7 +150,7 @@ Function Get-HDFSItem {
 		}
 
 		try {
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription
 		}
@@ -164,18 +168,30 @@ Function Get-HDFSItem {
 			switch ($PSCmdlet.ParameterSetName)
 			{
 				"Open" {
-					Write-Output -InputObject $Result.Content
+					[System.Byte[]]$Bytes = $Result.Content
+
+					if ($PSBoundParameters.ContainsKey("Encoding"))
+					{
+						Write-Output -InputObject $Encoding.GetString($Bytes)
+					}
+					else
+					{
+						Write-Output -InputObject $Bytes
+					}
+
 					break
 				}
 				"Status" {
-					Write-Output -InputObject ([PSCustomObject](ConvertFrom-Json -InputObject $Result.Content).FileStatus)
+					$Stat = ([PSCustomObject](ConvertFrom-Json -InputObject $Result.Content).FileStatus)
+					$Stat | Add-Member -MemberType NoteProperty -Name "name" -Value $Path
+					Write-Output -InputObject $Stat
 					break
 				}
 			}
 		}
 		else
 		{
-			Write-Warning -Message "There was an issue getting the item: $StatusCode $Reason - $($Result.Content)"
+			Write-Warning -Message "There was an issue getting the item: $StatusCode $Reason - $([System.Text.Encoding]::UTF8.GetString($Result.Content))"
 		}
 	}
 
@@ -229,7 +245,7 @@ Function Get-HDFSChildItem {
 		}
 
 		try {
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell	
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell	
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription
 		}
@@ -248,7 +264,7 @@ Function Get-HDFSChildItem {
 		}
 		else
 		{
-			Write-Warning -Message "There was an issue getting the child items item: $StatusCode $Reason - $($Result.Content)"
+			Write-Warning -Message "There was an issue getting the child items item: $StatusCode $Reason - $([System.Text.Encoding]::UTF8.GetString($Result.Content))"
 		}
 	}
 
@@ -262,13 +278,13 @@ Function New-HDFSItem {
 
 	#>
 	[CmdletBinding()]
-	[OutputType([System.Management.Automation.PSCustomObject[]])]
+	[OutputType([System.Management.Automation.PSCustomObject], [System.Boolean])]
 	Param(
 		[Parameter(Mandatory = $true)]
 		[ValidateNotNull()]
 		[System.String]$Path,
 
-		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+		[Parameter(ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[System.Object]$InputObject,
 
@@ -292,6 +308,10 @@ Function New-HDFSItem {
 		[System.Int32]$BufferSize,
 
 		[Parameter()]
+		[ValidateSet("File", "Directory", "SymbolicLink")]
+		[System.String]$ItemType = "File",
+
+		[Parameter()]
 		[ValidateScript({
 			$script:Sessions.ContainsKey($_.ToLower())
 		})]
@@ -313,85 +333,175 @@ Function New-HDFSItem {
 			$Session = $SessionInfo.Server
         }
 
-		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=CREATE"
-
-		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+		switch ($ItemType)
 		{
-			$Uri += "&user.name=$($SessionInfo.User)"
-		}
-		elseif($SessionInfo.ContainsKey("Delegation"))
-		{
-			$Uri += "&delegation=$($SessionInfo.Delegation)"
-		}
+			"File" {
+				[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=CREATE"
 
-		if ($Overwrite)
-		{
-			$Uri += "&overwrite=true"
-		}
-
-		if ($PSBoundParameters.ContainsKey("BlockSize"))
-		{
-			$Uri += "&blocksize=$BlockSize"
-		}
-
-		if ($PSBoundParameters.ContainsKey("Replication"))
-		{
-			$Uri += "&replication=$Replication"
-		}
-
-		if ($PSBoundParameters.ContainsKey("Permission"))
-		{
-			$Uri += "&permission=$Permission"
-		}
-
-		if ($PSBoundParameters.ContainsKey("BufferSize"))
-		{
-			$Uri += "&buffersize=$BufferSize"
-		}
-
-		try {
-			[Microsoft.PowerShell.Commands.WebResponseObject]$InitialResults = Invoke-WebRequest -Uri $Uri -Method Put -MaximumRedirection 0 -ErrorAction Stop -UserAgent PowerShell	
-			
-			if ($InitialResults.StatusCode -eq 307)
-			{
-				$Location = $InitialResults.Headers["Location"]
-				Write-Verbose -Message "Redirect location: $Location"
-
-				$ContentSplat = @{}
-
-				if ($InputObject.GetType().IsPrimitive -or 
-					($InputObject.GetType().IsArray -and ($InputObject.GetType().GetElementType().IsPrimitive -or $InputObject.GetType().GetElementType() -eq [System.String[]])) -or 
-					$InputObject.GetType() -eq [System.String])
+				if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
 				{
-					$ContentSplat.Add("Body", $InputObject)
+					$Uri += "&user.name=$($SessionInfo.User)"
+				}
+				elseif($SessionInfo.ContainsKey("Delegation"))
+				{
+					$Uri += "&delegation=$($SessionInfo.Delegation)"
+				}
+
+				if ($Overwrite)
+				{
+					$Uri += "&overwrite=true"
+				}
+
+				if ($PSBoundParameters.ContainsKey("BlockSize"))
+				{
+					$Uri += "&blocksize=$BlockSize"
+				}
+
+				if ($PSBoundParameters.ContainsKey("Replication"))
+				{
+					$Uri += "&replication=$Replication"
+				}
+
+				if ($PSBoundParameters.ContainsKey("Permission"))
+				{
+					$Uri += "&permission=$Permission"
+				}
+
+				if ($PSBoundParameters.ContainsKey("BufferSize"))
+				{
+					$Uri += "&buffersize=$BufferSize"
+				}
+
+				try {
+					[Microsoft.PowerShell.Commands.WebResponseObject]$InitialResults = Invoke-WebRequest -Uri $Uri -Method Put -MaximumRedirection 0 -ErrorAction Stop -UserAgent PowerShell	
+			
+					if ($InitialResults.StatusCode -eq 307)
+					{
+						$Location = $InitialResults.Headers["Location"]
+						Write-Verbose -Message "Redirect location: $Location"
+
+						$ContentSplat = @{}
+
+						if ($InputObject.GetType().IsPrimitive -or 
+							($InputObject.GetType().IsArray -and ($InputObject.GetType().GetElementType().IsPrimitive -or $InputObject.GetType().GetElementType() -eq [System.String[]])) -or 
+							$InputObject.GetType() -eq [System.String])
+						{
+							$ContentSplat.Add("Body", $InputObject)
+						}
+						else
+						{
+							$ContentSplat.Add("Body", (ConvertTo-Json -InputObject $InputObject))
+						}
+
+						[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Put -ErrorAction Stop -UserAgent PowerShell	@ContentSplat
+
+						$StatusCode = $Result.StatusCode
+						$Reason = $Result.StatusDescription
+					}
+				}
+				catch [System.Net.WebException] {
+					[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+					$StatusCode = [System.Int32]$Response.StatusCode
+					$Reason = "$($Response.StatusDescription) $($_.Exception.Message)"
+				}
+				catch [Exception]  {
+					$Reason = $_.Exception.Message
+				}
+
+				if ($StatusCode -eq 201)
+				{
+					Write-Output -InputObject ([PSCustomObject[]](ConvertFrom-Json -InputObject $Result.Content).FileStatuses.FileStatus)
 				}
 				else
 				{
-					$ContentSplat.Add("Body", (ConvertTo-Json -InputObject $InputObject))
+					Write-Warning -Message "There was an issue creating the item: $StatusCode $Reason - $([System.Text.Encoding]::UTF8.GetString($Result.Content))"
 				}
 
-				[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Put -ErrorAction Stop -UserAgent PowerShell	@ContentSplat
-
-				$StatusCode = $Result.StatusCode
-				$Reason = $Result.StatusDescription
+				break
 			}
-		}
-		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)"
-		}
-		catch [Exception]  {
-			$Reason = $_.Exception.Message
-		}
+			"Directory" {
+				[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=MKDIRS"
 
-		if ($StatusCode -eq 201)
-		{
-			Write-Output -InputObject ([PSCustomObject[]](ConvertFrom-Json -InputObject $Result.Content).FileStatuses.FileStatus)
-		}
-		else
-		{
-			Write-Warning -Message "There was an issue creating the item: $StatusCode $Reason - $($Result.Content)"
+				if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+				{
+					$Uri += "&user.name=$($SessionInfo.User)"
+				}
+				elseif($SessionInfo.ContainsKey("Delegation"))
+				{
+					$Uri += "&delegation=$($SessionInfo.Delegation)"
+				}
+
+				if ($PSBoundParameters.ContainsKey("Permission"))
+				{
+					$Uri += "&permission=$Permission"
+				}
+
+				try {
+					[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+
+					$StatusCode = $Result.StatusCode
+					$Reason = $Result.StatusDescription
+				}
+				catch [System.Net.WebException] {
+					[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+					$StatusCode = [System.Int32]$Response.StatusCode
+					$Reason = "$($Response.StatusDescription) $($_.Exception.Message)"
+				}
+				catch [Exception]  {
+					$Reason = $_.Exception.Message
+				}
+
+				if ($StatusCode -eq 200)
+				{
+					Write-Output -InputObject ([System.Boolean](ConvertFrom-Json -InputObject $Result.Content).boolean)
+				}
+				else
+				{
+					Write-Warning -Message "There was an issue creating the item: $StatusCode $Reason - $([System.Text.Encoding]::UTF8.GetString($Result.Content))"
+				}
+
+				break
+			}
+			"SymbolicLink" {
+				[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=CREATESYMLINK&destination=$InputObject"
+
+				if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+				{
+					$Uri += "&user.name=$($SessionInfo.User)"
+				}
+				elseif($SessionInfo.ContainsKey("Delegation"))
+				{
+					$Uri += "&delegation=$($SessionInfo.Delegation)"
+				}
+
+				try {
+					[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+
+					$StatusCode = $Result.StatusCode
+					$Reason = $Result.StatusDescription
+				}
+				catch [System.Net.WebException] {
+					[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+					$StatusCode = [System.Int32]$Response.StatusCode
+					$Reason = "$($Response.StatusDescription) $($_.Exception.Message)"
+				}
+				catch [Exception]  {
+					$Reason = $_.Exception.Message
+				}
+
+				if ($StatusCode -eq 200)
+				{
+					Write-Output -InputObject ([System.Boolean](ConvertFrom-Json -InputObject $Result.Content).boolean)
+				}
+				else
+				{
+					Write-Warning -Message "There was an issue creating the item: $StatusCode $Reason - $([System.Text.Encoding]::UTF8.GetString($Result.Content))"
+				}
+				break
+			}
+			default {
+				throw "Unknown parameter set."
+			}
 		}
 	}
 
