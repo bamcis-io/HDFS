@@ -85,14 +85,20 @@ Function Get-HDFSItem {
 
 	#>
 	[CmdletBinding(DefaultParameterSetName = "Status")]
-	[OutputType([System.String], [System.Management.Automation.PSCustomObject])]
+	[OutputType([System.String], [System.Byte[]], [System.Management.Automation.PSCustomObject])]
 	Param(
 		[Parameter(Mandatory = $true)]
-		[ValidateNotNull()]
+		[ValidateNotNullOrEmpty()]
 		[System.String]$Path,
 
 		[Parameter(ParameterSetName = "Status")]
 		[Switch]$Status,
+
+		[Parameter(ParameterSetName = "Summary")]
+		[Switch]$Summary,
+
+		[Parameter(ParameterSetName = "Checksum")]
+		[Switch]$Checksum,
 
 		[Parameter(ParameterSetName = "Open")]
 		[Switch]$Open,
@@ -137,7 +143,14 @@ Function Get-HDFSItem {
 
 		if ($Path.StartsWith("/"))
 		{
-			$Path = $Path.Substring(1)
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
 		}
 
 		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path"
@@ -166,6 +179,14 @@ Function Get-HDFSItem {
 			}
 			"Status" {
 				$Uri += "?op=GETFILESTATUS"
+				break
+			}
+			"Summary" {
+				$Uri += "?op=GETCONTENTSUMMARY"
+				break
+			}
+			"Checksum" {
+				$Uri += "?op=GETFILECHECKSUM"
 				break
 			}
 			default {
@@ -234,6 +255,18 @@ Function Get-HDFSItem {
 					Write-Output -InputObject $Stat
 					break
 				}
+				"Summary" {
+					$Summary = ([PSCustomObject](ConvertFrom-Json -InputObject $Result.Content).ContentSummary)
+					$Summary | Add-Member -MemberType NoteProperty -Name "name" -Value $Path
+					Write-Output -InputObject $Summary
+					break
+				}
+				"Checksum" {
+					$Checksum = ([PSCustomObject](ConvertFrom-Json -InputObject $Result.Content).FileChecksum)
+					$Checksum | Add-Member -MemberType NoteProperty -Name "name" -Value $Path
+					Write-Output -InputObject $Checksum
+					break
+				}
 			}
 		}
 		else
@@ -269,7 +302,7 @@ Function Get-HDFSChildItem {
 	[OutputType([System.Management.Automation.PSCustomObject[]])]
 	Param(
 		[Parameter(Mandatory = $true)]
-		[ValidateNotNull()]
+		[ValidateNotNullOrEmpty()]
 		[System.String]$Path,
 
 		[Parameter()]
@@ -296,7 +329,14 @@ Function Get-HDFSChildItem {
 
 		if ($Path.StartsWith("/"))
 		{
-			$Path = $Path.Substring(1)
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
 		}
 
 		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=LISTSTATUS"
@@ -342,6 +382,79 @@ Function Get-HDFSChildItem {
 
 	End {
 
+	}
+}
+
+Function Get-HDFSHomeDirectory {
+
+	[CmdletBinding()]
+	[OutputType([System.String])]
+	Param(
+		[Parameter()]
+		[ValidateScript({
+			$script:Sessions.ContainsKey($_.ToLower())
+		})]
+		[System.String]$Session = [System.String]::Empty
+	)
+
+	Begin {
+
+	}
+
+	Process {
+		[System.Collections.Hashtable]$SessionInfo = $null
+
+        if (-not [System.String]::IsNullOrEmpty($Session)) {
+            $SessionInfo = $script:Sessions.Get_Item($Session)
+        }
+        else {
+            $SessionInfo = $script:Sessions.GetEnumerator() | Select-Object -First 1 -ExpandProperty Value
+			$Session = $SessionInfo.Server
+        }
+
+		[System.String]$Uri = "$($SessionInfo.BaseUrl)/?op=GETHOMEDIRECTORY"
+
+		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+		{
+			$Uri += "&user.name=$($SessionInfo.User)"
+		}
+		elseif($SessionInfo.ContainsKey("Delegation"))
+		{
+			$Uri += "&delegation=$($SessionInfo.Delegation)"
+		}
+
+		try{
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell	
+
+			$StatusCode = $Result.StatusCode
+			$Reason = $Result.StatusDescription
+		}
+		catch [System.Net.WebException] {
+			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+			$StatusCode = [System.Int32]$Response.StatusCode
+			
+			[System.IO.Stream]$Stream = $Response.GetResponseStream()
+			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+			$Content = $Reader.ReadToEnd()
+
+			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+		}
+		catch [Exception]  {
+			$Reason = $_.Exception.Message
+		}
+
+		if ($StatusCode -eq 200)
+		{
+			Write-Output -InputObject ([PSCustomObject[]](ConvertFrom-Json -InputObject $Result.Content).Path)
+		}
+		else
+		{
+			Write-Warning -Message "There was an issue getting the home directory: $StatusCode $Reason - $($Result.Content)"
+		}
+	}
+
+	End {
 	}
 }
 
@@ -410,7 +523,14 @@ Function New-HDFSItem {
 
 		if ($Path.StartsWith("/"))
 		{
-			$Path = $Path.Substring(1)
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
 		}
 
 		switch ($ItemType)
@@ -639,11 +759,11 @@ Function Remove-HDFSItem {
 	<#
 
 	#>
-	[CmdletBinding()]
+	[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "HIGH")]
 	[OutputType([System.Boolean])]
 	Param(
 		[Parameter(Mandatory = $true)]
-		[ValidateNotNull()]
+		[ValidateNotNullOrEmpty()]
 		[System.String]$Path,
 
 		[Parameter()]
@@ -651,6 +771,9 @@ Function Remove-HDFSItem {
 
 		[Parameter()]
 		[Switch]$PassThru,
+
+		[Parameter()]
+		[Switch]$Force,
 
 		[Parameter()]
 		[ValidateScript({
@@ -676,7 +799,14 @@ Function Remove-HDFSItem {
 
 		if ($Path.StartsWith("/"))
 		{
-			$Path = $Path.Substring(1)
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
 		}
 
 		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=DELETE"
@@ -777,7 +907,14 @@ Function Add-HDFSItemContent {
 
 		if ($Path.StartsWith("/"))
 		{
-			$Path = $Path.Substring(1)
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
 		}
 
 		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=APPEND"
@@ -867,7 +1004,7 @@ Function Merge-HDFSItem {
 		[System.String]$Path,
 
 		[Parameter(Mandatory = $true)]
-		[ValidateNotNull()]
+		[ValidateNotNullOrEmpty()]
 		[System.String[]]$Sources,
 
 		[Parameter()]
@@ -894,7 +1031,14 @@ Function Merge-HDFSItem {
 
 		if ($Path.StartsWith("/"))
 		{
-			$Path = $Path.Substring(1)
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
 		}
 
 		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=CONCAT&paths=$([System.String]::Join(",", $Sources))"
@@ -988,7 +1132,14 @@ Function Rename-HDFSItem {
 
 		if ($Path.StartsWith("/"))
 		{
-			$Path = $Path.Substring(1)
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
 		}
 
 		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=RENAME&destination=$NewName"
@@ -1084,7 +1235,14 @@ Function Resize-HDFSItem {
 
 		if ($Path.StartsWith("/"))
 		{
-			$Path = $Path.Substring(1)
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
 		}
 
 		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=TRUNCATE&newlength=$NewLength"
@@ -1130,6 +1288,807 @@ Function Resize-HDFSItem {
 		else
 		{
 			Write-Warning -Message "There was an issue truncating the item: $StatusCode $Reason - $($Result.Content)"
+		}
+	}
+
+	End {
+
+	}
+}
+
+Function Set-HDFSItem {
+	<#
+
+
+	#>
+	[CmdletBinding()]
+	[OutputType([System.Boolean])]
+	Param(
+		[Parameter(Mandatory = $true)]
+		[ValidateNotNullOrEmpty()]
+		[System.String]$Path,
+
+		[Parameter(ParameterSetName = "Permission")]
+		[ValidateRange(1, 1777)]
+		[System.Int32]$Permission,
+
+		[Parameter(ParameterSetName = "Owner")]
+		[ValidateNotNullOrEmpty()]
+		[System.String]$Owner,
+
+		[Parameter(ParameterSetName = "Group")]
+		[ValidateNotNullOrEmpty()]
+		[System.String]$Group,
+
+		[Parameter(ParameterSetName = "Replication")]
+		[System.Int16]$ReplicationFactor,
+
+		[Parameter()]
+		[Switch]$PassThru,
+
+		[Parameter(ParameterSetName = "Access")]
+		[ValidateNotNull()]
+		[System.DateTime]$AccessTime,
+
+		[Parameter(ParameterSetName = "Modify")]
+		[ValidateNotNull()]
+		[System.DateTime]$ModificationTime,
+
+		[Parameter()]
+		[ValidateScript({
+			$script:Sessions.ContainsKey($_.ToLower())
+		})]
+		[System.String]$Session = [System.String]::Empty
+	)
+
+	Begin {
+	}
+
+	Process {
+		[System.Collections.Hashtable]$SessionInfo = $null
+
+        if (-not [System.String]::IsNullOrEmpty($Session)) {
+            $SessionInfo = $script:Sessions.Get_Item($Session)
+        }
+        else {
+            $SessionInfo = $script:Sessions.GetEnumerator() | Select-Object -First 1 -ExpandProperty Value
+			$Session = $SessionInfo.Server
+        }
+
+		if ($Path.StartsWith("/"))
+		{
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
+		}
+
+		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path"
+
+		switch ($PSCmdlet.ParameterSetName)
+		{
+			"Permission" {
+				$Uri += "?op=SETPERMISSION&permission=$Permission"
+				break
+			}
+			"Owner" {
+				$Uri += "?op=SETOWNER&owner=$Owner"
+				break
+			}
+			"Group" {
+				$Uri += "?op=SETOWNER&group=$Group"
+				break
+			}
+			"Replication" {
+				$Uri += "?op=SETREPLICATION&replication=$ReplicationFactor"
+				break
+			}
+			"Modify" {
+				$1970 = New-Object -TypeName System.DateTime(1970, 1, 1, 0, 0, 0, [System.DateTimeKind]::Utc)
+				$Diff = ($ModificationTime - $1970).TotalSeconds
+
+				# A -1 keeps the time unchanged
+				if ($Diff -lt 0)
+				{
+					$Diff = -1
+				}
+
+				$Uri += "?op=SETTIMES&modificationtime=$Diff"
+				break
+			}
+			"Access" {
+				$1970 = New-Object -TypeName System.DateTime(1970, 1, 1, 0, 0, 0, [System.DateTimeKind]::Utc)
+				$Diff = ($AccessTime - $1970).TotalSeconds
+
+				# A -1 keeps the time unchanged
+				if ($Diff -lt 0)
+				{
+					$Diff = -1
+				}
+
+				$Uri += "?op=SETTIMES&accesstime=$Diff"
+				break
+			}
+			default {
+				throw "Unknown parameter set."
+			}
+		}
+
+		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+		{
+			$Uri += "&user.name=$($SessionInfo.User)"
+		}
+		elseif($SessionInfo.ContainsKey("Delegation"))
+		{
+			$Uri += "&delegation=$($SessionInfo.Delegation)"
+		}
+
+		try
+		{
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+
+			$StatusCode = $Result.StatusCode
+			$Reason = $Result.StatusDescription	
+		}
+		catch [System.Net.WebException] {
+			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+			$StatusCode = [System.Int32]$Response.StatusCode
+			
+			[System.IO.Stream]$Stream = $Response.GetResponseStream()
+			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+			$Content = $Reader.ReadToEnd()
+
+			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+		}
+		catch [Exception]  {
+			$Reason = $_.Exception.Message
+		}
+
+		if ($StatusCode -eq 200)
+		{
+			if ($PSCmdlet.ParameterSetName -eq "Replication" -and $PassThru)
+			{
+				Write-Output -InputObject ([System.Boolean](ConvertFrom-Json -InputObject $Result.Content).boolean)
+			}
+		}
+		else
+		{
+			Write-Warning -Message "There was an issue updating the item: $StatusCode $Reason - $($Result.Content)"
+		}
+	}
+
+	End {
+	}
+}
+
+Function Set-HDFSAcl {
+	<#
+
+
+	#>
+	[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "HIGH")]
+	[OutputType([System.Boolean])]
+	Param(
+		[Parameter(Mandatory = $true)]
+		[ValidateNotNullOrEmpty()]
+		[System.String]$Path,
+
+		[Parameter(Mandatory = $true, ParameterSetName = "Update")]
+		[Parameter(Mandatory = $true, ParameterSetName = "Replace")]
+		[Parameter(Mandatory = $true, ParameterSetName = "Remove")]
+		[System.String[]]$Acl = @(),
+
+		[Parameter(ParameterSetName = "Update")]
+		[Switch]$Update,
+
+		[Parameter(ParameterSetName = "Replace")]
+		[Switch]$Replace,
+
+		[Parameter(ParameterSetName = "Remove")]
+		[Switch]$Remove,
+
+		[Parameter(ParameterSetName = "Default")]
+		[Switch]$RemoveDefaultAcl,
+
+		[Parameter(ParameterSetName = "RemoveAll")]
+		[Switch]$RemoveAll,
+
+		[Parameter()]
+		[ValidateScript({
+			$script:Sessions.ContainsKey($_.ToLower())
+		})]
+		[System.String]$Session = [System.String]::Empty
+	)
+
+	Begin {
+	}
+
+	Process {
+		[System.Collections.Hashtable]$SessionInfo = $null
+
+        if (-not [System.String]::IsNullOrEmpty($Session)) {
+            $SessionInfo = $script:Sessions.Get_Item($Session)
+        }
+        else {
+            $SessionInfo = $script:Sessions.GetEnumerator() | Select-Object -First 1 -ExpandProperty Value
+			$Session = $SessionInfo.Server
+        }
+
+		if ($Path.StartsWith("/"))
+		{
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
+		}
+
+		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path"
+
+		$AclString = [System.String]::Empty
+
+		if ($Acl.Length -gt 0)
+		{
+			$AclString = [System.String]::Join(",", $Acl)
+		}
+
+		switch ($PSCmdlet.ParameterSetName)
+		{
+			"Update" {
+				$Uri += "?op=MODIFYACLENTRIES&aclspec=$Acl"
+				break
+			}
+			"Replace" {
+				$Uri += "?op=SETACL&aclspec=$Acl"
+				break
+			}
+			"Remove" {
+				$Uri += "?op=REMOVEACLENTRIES&aclspec=$Acl"
+				break
+			}
+			"Default" {
+				$Uri += "?op=REMOVEDEFAULTACL"
+				break
+			}
+			"RemoveAll" {
+				$Uri += "?op=REMOVEACL"
+				break
+			}
+			default {
+				throw "Unknown parameter set."
+			}
+		}
+
+		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+		{
+			$Uri += "&user.name=$($SessionInfo.User)"
+		}
+		elseif($SessionInfo.ContainsKey("Delegation"))
+		{
+			$Uri += "&delegation=$($SessionInfo.Delegation)"
+		}
+
+		try
+		{
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+
+			$StatusCode = $Result.StatusCode
+			$Reason = $Result.StatusDescription	
+		}
+		catch [System.Net.WebException] {
+			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+			$StatusCode = [System.Int32]$Response.StatusCode
+			
+			[System.IO.Stream]$Stream = $Response.GetResponseStream()
+			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+			$Content = $Reader.ReadToEnd()
+
+			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+		}
+		catch [Exception]  {
+			$Reason = $_.Exception.Message
+		}
+
+		if ($StatusCode -ne 200)
+		{			
+			Write-Warning -Message "There was an issue modifying the item's ACL: $StatusCode $Reason - $($Result.Content)"
+		}
+	}
+
+	End {
+	}
+}
+
+Function Get-HDFSAcl {
+	<#
+
+	#>
+	[CmdletBinding()]
+	[OutputType([PSCustomObject])]
+	Param(
+		[Parameter(Mandatory = $true)]
+		[ValidateNotNullOrEmpty()]
+		[System.String]$Path,
+
+		[Parameter()]
+		[ValidateScript({
+			$script:Sessions.ContainsKey($_.ToLower())
+		})]
+		[System.String]$Session = [System.String]::Empty
+	)
+
+	Begin {
+
+	}
+
+	Process {
+		[System.Collections.Hashtable]$SessionInfo = $null
+
+        if (-not [System.String]::IsNullOrEmpty($Session)) {
+            $SessionInfo = $script:Sessions.Get_Item($Session)
+        }
+        else {
+            $SessionInfo = $script:Sessions.GetEnumerator() | Select-Object -First 1 -ExpandProperty Value
+			$Session = $SessionInfo.Server
+        }
+
+		if ($Path.StartsWith("/"))
+		{
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
+		}
+
+		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=GETACLSTATUS"
+
+		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+		{
+			$Uri += "&user.name=$($SessionInfo.User)"
+		}
+		elseif($SessionInfo.ContainsKey("Delegation"))
+		{
+			$Uri += "&delegation=$($SessionInfo.Delegation)"
+		}
+
+		try
+		{
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+
+			$StatusCode = $Result.StatusCode
+			$Reason = $Result.StatusDescription	
+		}
+		catch [System.Net.WebException] {
+			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+			$StatusCode = [System.Int32]$Response.StatusCode
+			
+			[System.IO.Stream]$Stream = $Response.GetResponseStream()
+			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+			$Content = $Reader.ReadToEnd()
+
+			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+		}
+		catch [Exception]  {
+			$Reason = $_.Exception.Message
+		}
+
+		if ($StatusCode -eq 200)
+		{
+			Write-Output -InputObject ([PSCustomObject](ConvertFrom-Json -InputObject $Result.Content).AclStatus)
+		}
+		else
+		{
+			Write-Warning -Message "There was an issue getting the acl status: $StatusCode $Reason - $($Result.Content)"
+		}
+	}
+
+	End {
+
+	}
+}
+
+Function Test-HDFSAccess {
+	<#
+
+	#>
+	[CmdletBinding()]
+	[OutputType([System.Boolean])]
+	Param(
+		[Parameter(Mandatory = $true)]
+		[ValidateNotNullOrEmpty()]
+		[System.String]$Path,
+
+		[Parameter(Mandatory = $true)]
+		[ValidateSet("ALL", "EXECUTE", "NONE", "READ", "READ_EXECUTE", "READ_WRITE", "WRITE", "WRITE_EXECUTE")]
+		[System.String]$Action,
+
+		[Parameter()]
+		[ValidateScript({
+			$script:Sessions.ContainsKey($_.ToLower())
+		})]
+		[System.String]$Session = [System.String]::Empty
+	)
+
+	Begin {
+
+	}
+
+	Process {
+		[System.Collections.Hashtable]$SessionInfo = $null
+
+        if (-not [System.String]::IsNullOrEmpty($Session)) {
+            $SessionInfo = $script:Sessions.Get_Item($Session)
+        }
+        else {
+            $SessionInfo = $script:Sessions.GetEnumerator() | Select-Object -First 1 -ExpandProperty Value
+			$Session = $SessionInfo.Server
+        }
+
+		if ($Path.StartsWith("/"))
+		{
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
+		}
+
+		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=CHECKACCESS&fsaction=$Action"
+
+		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+		{
+			$Uri += "&user.name=$($SessionInfo.User)"
+		}
+		elseif($SessionInfo.ContainsKey("Delegation"))
+		{
+			$Uri += "&delegation=$($SessionInfo.Delegation)"
+		}
+
+		try
+		{
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+
+			$StatusCode = $Result.StatusCode
+			$Reason = $Result.StatusDescription	
+		}
+		catch [System.Net.WebException] {
+			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+			$StatusCode = [System.Int32]$Response.StatusCode
+			
+			[System.IO.Stream]$Stream = $Response.GetResponseStream()
+			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+			$Content = $Reader.ReadToEnd()
+
+			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+		}
+		catch [Exception]  {
+			$Reason = $_.Exception.Message
+		}
+
+		if ($StatusCode -eq 200)
+		{
+			Write-Output -InputObject $true
+		}
+		else
+		{
+			Write-Output -InputObject $false
+			Write-Verbose -Message "The access test was unsuccessful: $StatusCode $Reason - $($Result.Content)"
+		}
+	}
+
+	End {
+
+	}
+}
+
+Function Get-HDFSStoragePolicy {
+	<#
+
+	#>
+	[CmdletBinding(DefaultParameterSetName = "All")]
+	[OutputType([System.Management.Automation.PSCustomObject], [System.Management.Automation.PSCustomObject[]])]
+	Param(
+		[Parameter(ParameterSetName = "Path", Mandatory = $true)]
+		[ValidateNotNullOrEmpty()]
+		[System.String]$Path,
+
+		[Parameter()]
+		[ValidateScript({
+			$script:Sessions.ContainsKey($_.ToLower())
+		})]
+		[System.String]$Session = [System.String]::Empty
+	)
+
+	Begin {
+
+	}
+
+	Process {
+		[System.Collections.Hashtable]$SessionInfo = $null
+
+        if (-not [System.String]::IsNullOrEmpty($Session)) {
+            $SessionInfo = $script:Sessions.Get_Item($Session)
+        }
+        else {
+            $SessionInfo = $script:Sessions.GetEnumerator() | Select-Object -First 1 -ExpandProperty Value
+			$Session = $SessionInfo.Server
+        }
+
+		[System.String]$Uri = "$($SessionInfo.BaseUrl)"
+
+		switch ($PSCmdlet.ParameterSetName)
+		{
+			"All" {
+				$Uri += "?op=GETALLSTORAGEPOLICY"
+				break
+			}
+			"Path" {
+				if ($Path.StartsWith("/"))
+				{
+					if ($Path.Length -gt 1)
+					{
+						$Path = $Path.Substring(1)
+					}
+					else
+					{
+						$Path = [System.String]::Empty
+					}
+				}
+
+				$Uri += "/$Path`?op=GETSTORAGEPOLICY"
+				break
+			}
+			default {
+				throw "Unknown parameter set"
+			}
+		}
+
+		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+		{
+			$Uri += "&user.name=$($SessionInfo.User)"
+		}
+		elseif($SessionInfo.ContainsKey("Delegation"))
+		{
+			$Uri += "&delegation=$($SessionInfo.Delegation)"
+		}
+
+		try
+		{
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+
+			$StatusCode = $Result.StatusCode
+			$Reason = $Result.StatusDescription	
+		}
+		catch [System.Net.WebException] {
+			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+			$StatusCode = [System.Int32]$Response.StatusCode
+			
+			[System.IO.Stream]$Stream = $Response.GetResponseStream()
+			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+			$Content = $Reader.ReadToEnd()
+
+			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+		}
+		catch [Exception]  {
+			$Reason = $_.Exception.Message
+		}
+
+		if ($StatusCode -eq 200)
+		{
+			switch ($PSCmdlet.ParameterSetName)
+			{
+				"All" {
+					Write-Output -InputObject ([PSCustomObject[]](ConvertFrom-Json -InputObject $Result.Content).BlockStoragePolicies.BlockStoragePolicy)
+					break
+				}
+				"Path" {
+					Write-Output -InputObject ([PSCustomObject](ConvertFrom-Json -InputObject $Result.Content).BlockStoragePolicy)
+					break
+				}
+			}
+		}
+		else
+		{
+			Write-Warning -Message "The was an issue retrieving the storage policies: $StatusCode $Reason - $($Result.Content)"
+		}
+	}
+
+	End {
+	}
+}
+
+Function Set-HDFSStoragePolicy {
+	<#
+
+	#>
+	[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "HIGH")]
+	[OutputType()]
+	Param(
+		[Parameter(Mandatory = $true)]
+		[ValidateNotNullOrEmpty()]
+		[System.String]$Path,
+
+		[Parameter(Mandatory = $true)]
+		[System.String]$Policy,
+
+		[Parameter()]
+		[ValidateScript({
+			$script:Sessions.ContainsKey($_.ToLower())
+		})]
+		[System.String]$Session = [System.String]::Empty
+	)
+
+	Begin {
+
+	}
+
+	Process {
+		[System.Collections.Hashtable]$SessionInfo = $null
+
+        if (-not [System.String]::IsNullOrEmpty($Session)) {
+            $SessionInfo = $script:Sessions.Get_Item($Session)
+        }
+        else {
+            $SessionInfo = $script:Sessions.GetEnumerator() | Select-Object -First 1 -ExpandProperty Value
+			$Session = $SessionInfo.Server
+        }
+
+		if ($Path.StartsWith("/"))
+		{
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
+		}
+
+		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=SETSTORAGEPOLICY&storagepolicy=$Policy"
+
+		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+		{
+			$Uri += "&user.name=$($SessionInfo.User)"
+		}
+		elseif($SessionInfo.ContainsKey("Delegation"))
+		{
+			$Uri += "&delegation=$($SessionInfo.Delegation)"
+		}
+
+		try
+		{
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+
+			$StatusCode = $Result.StatusCode
+			$Reason = $Result.StatusDescription	
+		}
+		catch [System.Net.WebException] {
+			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+			$StatusCode = [System.Int32]$Response.StatusCode
+			
+			[System.IO.Stream]$Stream = $Response.GetResponseStream()
+			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+			$Content = $Reader.ReadToEnd()
+
+			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+		}
+		catch [Exception]  {
+			$Reason = $_.Exception.Message
+		}
+
+		if ($StatusCode -ne 200)
+		{
+			Write-Warning -Message "The was an issue setting the storage policy: $StatusCode $Reason - $($Result.Content)"
+		}
+	}
+
+	End {
+
+	}
+}
+
+Function Remove-HDFSStoragePolicy {
+	<#
+
+	#>
+	[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "HIGH")]
+	[OutputType()]
+	Param(
+		[Parameter(Mandatory = $true)]
+		[ValidateNotNullOrEmpty()]
+		[System.String]$Path,
+
+		[Parameter()]
+		[ValidateScript({
+			$script:Sessions.ContainsKey($_.ToLower())
+		})]
+		[System.String]$Session = [System.String]::Empty
+	)
+
+	Begin {
+
+	}
+
+	Process {
+		[System.Collections.Hashtable]$SessionInfo = $null
+
+        if (-not [System.String]::IsNullOrEmpty($Session)) {
+            $SessionInfo = $script:Sessions.Get_Item($Session)
+        }
+        else {
+            $SessionInfo = $script:Sessions.GetEnumerator() | Select-Object -First 1 -ExpandProperty Value
+			$Session = $SessionInfo.Server
+        }
+
+		if ($Path.StartsWith("/"))
+		{
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
+		}
+
+		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=UNSETSTORAGEPOLICY"
+
+		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+		{
+			$Uri += "&user.name=$($SessionInfo.User)"
+		}
+		elseif($SessionInfo.ContainsKey("Delegation"))
+		{
+			$Uri += "&delegation=$($SessionInfo.Delegation)"
+		}
+
+		try
+		{
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -ErrorAction Stop -UserAgent PowerShell
+
+			$StatusCode = $Result.StatusCode
+			$Reason = $Result.StatusDescription	
+		}
+		catch [System.Net.WebException] {
+			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+			$StatusCode = [System.Int32]$Response.StatusCode
+			
+			[System.IO.Stream]$Stream = $Response.GetResponseStream()
+			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+			$Content = $Reader.ReadToEnd()
+
+			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+		}
+		catch [Exception]  {
+			$Reason = $_.Exception.Message
+		}
+
+		if ($StatusCode -ne 200)
+		{
+			Write-Warning -Message "The was an issue unsetting the storage policy: $StatusCode $Reason - $($Result.Content)"
 		}
 	}
 
