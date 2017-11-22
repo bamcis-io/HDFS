@@ -2,8 +2,63 @@
 
 Function New-HDFSSession {
 	<#
+		.SYNOPSIS
+			Creates a new HDFS session with the specified name node. These settings are used in all subsequent API calls.
 
+		.DESCRIPTION
+			This cmdlet creates a new HDFS session to the specified name node on the specified port. You may also specify the username or
+			delegation token to use with all requests. If you choose to "Initialize" the session, a call to get the HomeDirectory is made to
+			retrieve the hadoop.auth Cookie, which is then used on all subsequent calls. 
 
+			Multiple sessions can be established, each with a different namenode. This allows you to specify the Session identifier (the namenode value
+			supplied) in HDFS cmdlets to interact with different namenodes in the same script. You can loop through sessions and perform the same cmdlet
+			on different HDFS systems easily.
+
+		.PARAMETER Namenode
+			The namenode IP or hostname with which all communication starts.
+
+		.PARAMETER Port
+			The port to use for namenode communication. This defaults to 50070.
+
+		.PARAMETER Version
+			The version of the REST API to use. Currently, only v1 is available and is the default.
+
+		.PARAMETER Username
+			The username to use during transactions.
+
+		.PARAMETER DelegationToken
+			The delegation token to use during transactions.
+
+		.PARAMETER KerberosCredentials
+			The Base64 encoded credentials to use with kerberos authentication. This string is supplied in the NEGOTIATE authorization header. 
+
+			THIS PARAMETER HAS NOT BEEN TESTED.
+
+		.PARAMETER UseSsl
+			Specify to use HTTPS connections.
+
+		.PARAMETER Initialize
+			If this parameter is specified, a request to retrieve the Home Directory is performed in order to retrieve the hadoop.auth cookie that will
+			be included in each subsequent transaction. If this is not specified, the cookie will be assigned on next REST API call.
+
+		.PARAMETER PassThru
+			Returns the key this session is being stored as. The session identifier can be used to make calls to different namenodes in single script by 
+			supplying it to the Session parameter.
+
+		.EXAMPLE
+			New-HDFSSession -Namenode "hdserver" -Username "hdadmin"
+			
+			Establishes a new session with the namenode "hdserver" using the user "hdadmin".
+
+		.INPUTS
+			None
+
+		.OUTPUTS
+			None or System.String
+		
+		.NOTES
+			AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding(DefaultParameterSetName = "User")]
 	[OutputType([System.String])]
@@ -28,50 +83,106 @@ Function New-HDFSSession {
 		[ValidateNotNullOrEmpty()]
 		[System.String]$DelegationToken = [System.String]::Empty,
 
+		[Parameter(ParameterSetName = "Kerberos")]
+		[ValidateNotNullOrEmpty()]
+		[System.String]$KerberosCredentials,
+
 		[Parameter()]
-		[Switch]$UseSsl
+		[Switch]$UseSsl,
+
+		[Parameter()]
+		[Switch]$Initialize,
+
+		[Parameter()]
+		[Switch]$PassThru
 	)
 
 	Begin {
 	}
 
 	Process {
-		[System.String]$Scheme = if ($UseSsl) { "https" } else { "http" }
+		if (-not $script:Sessions.ContainsKey($Namenode))
+		{
+			[System.String]$Scheme = if ($UseSsl) { "https" } else { "http" }
 		
-		[System.String]$HostPath = [System.String]::Empty
+			[System.String]$HostPath = [System.String]::Empty
 
-		if ($UseSsl -and $Port -eq 443)
-		{
-			$HostPath = $Namenode
-		}
-		elseif (-not $UseSsl -and $Port -eq 80)
-		{
-			$HostPath = $Namenode
+			if ($UseSsl -and $Port -eq 443)
+			{
+				$HostPath = $Namenode
+			}
+			elseif (-not $UseSsl -and $Port -eq 80)
+			{
+				$HostPath = $Namenode
+			}
+			else
+			{
+				$HostPath = "$Namenode`:$Port"
+			}
+
+			$Url = [System.String]$Url = "$Scheme`://$HostPath/webhdfs/$Version"
+			[Microsoft.PowerShell.Commands.WebRequestSession]$Session = New-Object -TypeName Microsoft.PowerShell.Commands.WebRequestSession
+			$Session.UserAgent = "PowerShell"
+
+			$script:Sessions.Add($Namenode, @{Server = $Namenode; Port = $Port; Version = $Version; Scheme = $Scheme; BaseUrl = $Url; Session = $Session;})
+		
+			[System.String]$Uri = "$Url/?op=GETHOMEDIRECTORY"
+
+			switch ($PSCmdlet.ParameterSetName)
+			{
+				"User" {
+					$script:Sessions.Get_Item($Namenode).Add("User", $Username)
+					$Uri += "&user.name=$Username"
+					break
+				}
+				"Delegation" {
+					$script:Sessions.Get_Item($Namenode).Add("Delegation", $DelegationToken)
+					$Uri += "&delegation=$DelegationToken"
+					break
+				}
+				"Kerberos" {
+					$script:Sessions.Get_Item($Namenode).Session.Headers.Add("Authorization: NEGOTIATE $KerberosCredentials")
+					break
+				}
+			}
+
+			if ($Initialize)
+			{		
+				try{
+					[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $script:Sessions.Get_Item($Namenode).Session
+
+					$StatusCode = $Result.StatusCode
+					$Reason = $Result.StatusDescription
+				}
+				catch [System.Net.WebException] {
+					[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+					$StatusCode = [System.Int32]$Response.StatusCode
+			
+					[System.IO.Stream]$Stream = $Response.GetResponseStream()
+					[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+					[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+					$Content = $Reader.ReadToEnd()
+
+					$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+				}
+				catch [Exception]  {
+					$Reason = $_.Exception.Message
+				}
+
+				if ($StatusCode -ne 200)
+				{
+					Write-Warning -Message "There was an issue initializing the HDFS session: $StatusCode $Reason - $($Result.Content)"
+				}
+			}
+
+			if ($PassThru)
+			{
+				Write-Output -InputObject $Namenode
+			}
 		}
 		else
 		{
-			$HostPath = "$Namenode`:$Port"
-		}
-
-
-		$Url = [System.String]$Url = "$Scheme`://$HostPath/webhdfs/$Version"
-
-		$script:Sessions.Add($Namenode, @{Server = $Namenode; Port = $Port; Version = $Version; Scheme = $Scheme; BaseUrl = $Url})
-
-		switch ($PSCmdlet.ParameterSetName)
-		{
-			"User" {
-				$script:Sessions.Get_Item($Namenode).Add("User", $Username)
-				break
-			}
-			"Delegation" {
-				$script:Sessions.Get_Item($Namenode).Add("Delegation", $DelegationToken)
-				break
-			}
-			"Kerberos" {
-
-				break
-			}
+			Write-Warning -Message "There is already a session for $Namenode, please remove this session with 'Remove-HDFSSession -Session $Namenode' in order to setup a new session."
 		}
 	}
 
@@ -80,14 +191,158 @@ Function New-HDFSSession {
 	}
 }
 
+Function Remove-HDFSSession {
+	<#
+        .SYNOPSIS
+			Removes a stored HDFS session.
+
+        .DESCRIPTION
+            The cmdlet removes an established HDFS session by its Id.
+
+        .PARAMETER Session
+            Specifies the unique identifier of the session to remove.
+
+        .EXAMPLE
+            Remove-HDFSSession -Session hdserver
+
+            Removes the persisted session information for hdserver.
+
+        .INPUTS
+            None or System.String
+
+        .OUTPUTS
+            None
+
+        .NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
+    #>
+	[CmdletBinding()]
+	[OutputType([System.String])]
+	Param(
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+		[ValidateNotNullOrEmpty()]
+		[ValidateScript({
+			$script:Sessions.ContainsKey($_.ToLower())
+		})]
+		[System.String]$Session
+	)
+
+	Begin {
+	}
+
+	Process {
+		$script:Sessions.Remove($Session)
+	}
+
+	End {
+
+	}
+}
+
+Function Get-HDFSSession {
+	<#
+        .SYNOPSIS
+            Gets stored HDFS session information.
+
+        .DESCRIPTION
+            The cmdlet retrieves an established HDFS session by its Id, or lists all active sessions.
+
+        .PARAMETER Session
+            Specifies the unique identifier of the session to query. If this parameter is not specified, all stored sessions are returned.
+
+        .EXAMPLE
+            Get-HDFSSession
+
+            Gets all HDFS session information stored in the script variable.
+
+        .INPUTS
+            None or System.String
+
+        .OUTPUTS
+            System.Collections.Hashtable
+
+        .NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
+    #>
+	[CmdletBinding()]
+	[OutputType([System.Collections.Hashtable])]
+	Param(
+		[Parameter(ValueFromPipeline = $true)]
+		[ValidateNotNullOrEmpty()]
+		[ValidateScript({
+			$script:Sessions.ContainsKey($_.ToLower())
+		})]
+        [System.String]$Session = [System.String]::Empty
+	)
+
+	Begin {
+	}
+
+	Process {
+		if (-not [System.String]::IsNullOrEmpty($Session)) {
+			if ($script:Sessions.ContainsKey($Session)) {
+				Write-Output -InputObject $script:Sessions.Get_Item($Session)
+			}
+            else {
+                Write-Output -InputObject $null
+            }
+		}
+		else {
+			Write-Output -InputObject $script:Sessions
+		}
+	}
+
+	End {
+	}
+}
+
 Function Get-HDFSItem {
 	<#
+		.SYNOPSIS
+			Gets an HDFS item.
 
+		.DESCRIPTION
+			This cmdlet gets ths status, summary, or checksum of an HDFS file or directory.
+
+		.PARAMETER Path
+			The path to the item. This can be blank and doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Status
+			Gets the status of the HDFS item. This is the default.
+
+		.PARAMETER Summary
+			Gets a summary of the HDFS directory. If the path specified is not a directory, this will produce an error.
+
+		.PARAMETER Checksum
+			Gets a checksum of the HDFS item. The response will include the algorithm, bytes of the hash, and length.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Get-HDFSItem -Path "/out/text.txt"
+
+			Gets the status of the supplied path item.
+
+		.INPUTS
+			System.String
+
+			The path can be piped to this cmdlet.
+
+		.OUTPUTS
+			System.String, System.Management.Automation.PSCustomObject
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding(DefaultParameterSetName = "Status")]
-	[OutputType([System.String], [System.Byte[]], [System.Management.Automation.PSCustomObject])]
+	[OutputType([System.String], [System.Management.Automation.PSCustomObject])]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
@@ -167,7 +422,7 @@ Function Get-HDFSItem {
 
 		try {
 
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription
@@ -238,12 +493,53 @@ Function Get-HDFSItem {
 
 Function Get-HDFSContent {
 	<#
+		.SYNOPSIS
+			Gets the content of an HDFS file
 
+		.DESCRIPTION
+			This cmdlet gets the content of an HDFS file. If an encoding is specified, this is returned as a string, otherwise
+			it is returned as a byte array.
+
+		.PARAMETER Path
+			The path to the item. This can be blank and doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Offset
+			The offset in number of bytes of the file to start retrieving data.
+
+		.PARAMETER Length
+			The amount of content in bytes to retrieve
+
+		.PARAMETER Buffersize
+			The size of the buffer to use to retrieve the content.
+
+		.PARAMETER Encoding
+			The encoding to use to translate the returned byte stream.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Get-HDFSContent -Path "/out/text.txt" -Encoding ([System.Text.Encoding]::UTF8)
+
+			Retrieves the content of /out/text.txt and decods the bytes as UTF8.
+
+		.INPUTS
+			System.String
+
+			The path can be piped to this cmdlet.
+
+		.OUTPUTS
+			System.String, System.Byte[]
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType([System.String], [System.Byte[]])]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNullOrEmpty()]
 		[ValidateScript({
 			$_.Length -gt 2
@@ -328,7 +624,7 @@ Function Get-HDFSContent {
 
 		try {
 			# Returns an octet stream
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription
@@ -388,12 +684,40 @@ Function Get-HDFSContent {
 
 Function Get-HDFSChildItem {
 	<#
+		.SYNOPSIS
+			Gets the child items on an HDFS directory.
 
+		.DESCRIPTION
+			This cmdlet gets a listing of the statuses of the direct child items of an HDFS directory.
+
+		.PARAMETER Path
+			The path to the item. This can be blank and doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Get-HDFSChildItem -Path "/out" 
+
+			Retrieves contents of the /out directory
+
+		.INPUTS
+			System.String
+
+			The path can be piped to this cmdlet.
+
+		.OUTPUTS
+			System.Management.Automation.PSCustomObject[]
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType([System.Management.Automation.PSCustomObject[]])]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
@@ -444,7 +768,7 @@ Function Get-HDFSChildItem {
 		}
 
 		try {
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell	
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription
 		}
@@ -479,7 +803,32 @@ Function Get-HDFSChildItem {
 }
 
 Function Get-HDFSHomeDirectory {
+	<#
+		.SYNOPSIS
+			Gets the HDFS home directory.
 
+		.DESCRIPTION
+			This cmdlet gets the currently configured HDFS home directory.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Get-HDFSHomeDirectory
+
+			Gets the HDFS home directory.
+
+		.INPUTS
+			None
+
+		.OUTPUTS
+			System.String
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
+	#>
 	[CmdletBinding()]
 	[OutputType([System.String])]
 	Param(
@@ -517,7 +866,7 @@ Function Get-HDFSHomeDirectory {
 		}
 
 		try{
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell	
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription
@@ -553,7 +902,64 @@ Function Get-HDFSHomeDirectory {
 
 Function New-HDFSItem {
 	<#
+		.SYNOPSIS
+			Creates a new HDFS file or directory.
 
+		.DESCRIPTION
+			This cmdlet creates a new HDFS file with the provided content, an HDFS directory, or a symbollic link.
+
+		.PARAMETER Path
+			The path to the item. This can be blank and doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER InputObject
+			The content to be written to the new HDFS file. If the item type is a directory, this parameter is ignored.
+
+		.PARAMETER Overwrite
+			If this is specified, if the specified path already exists, it will be overwritten.
+
+		.PARAMETER BlockSize
+			The block size to use for the new item.
+
+		.PARAMETER Replication
+			The replication factor for the item, i.e. how many replicas of the item will be maintained.
+
+		.PARAMETER Permission
+			The permissions in OCTAL form for the item, this defaults to 755.
+
+		.PARAMETER BufferSize
+			The size of the buffer to use to write the content.
+
+		.PARAMETER ItemType
+			The type of the item to create, either a file, directory, or symbollic link.
+
+		.PARAMETER PassThru,
+			If specified, for a directory or symbollic link, a boolean is returned indicating whether the item was successfully created.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			New-HDFSItem -Path "/input" -ItemType Directory
+
+			Creates a new directory called input.
+
+		.EXAMPLE
+			New-HDFSItem -Path "/input/test.txt." -InputObject "TEST"
+
+			Creates a new file with the string content "TEST".
+
+		.INPUTS
+			System.Object
+
+			The data to be written to the new file can be piped to this cmdlet.
+
+		.OUTPUTS
+			None or System.Boolean
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType([System.Management.Automation.PSCustomObject], [System.Boolean])]
@@ -671,7 +1077,7 @@ Function New-HDFSItem {
 				try {
 					# WebHDFS uses a two part process to create a file, the redirect provides the datanode via the location header
 					# where the client will send the data to create the file
-					[Microsoft.PowerShell.Commands.WebResponseObject]$RedirectResult = Invoke-WebRequest -Uri $Uri -Method Put -MaximumRedirection 0 -ErrorAction Stop -UserAgent PowerShell	
+					[Microsoft.PowerShell.Commands.WebResponseObject]$RedirectResult = Invoke-WebRequest -Uri $Uri -Method Put -MaximumRedirection 0 -ErrorAction Stop -WebSession $SessionInfo.Session
 			
 					if ($RedirectResult.StatusCode -eq 307)
 					{
@@ -695,7 +1101,7 @@ Function New-HDFSItem {
 						}
 
 						# No content returned
-						[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Put -ErrorAction Stop -UserAgent PowerShell	@ContentSplat
+						[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session	@ContentSplat
 
 						$StatusCode = $Result.StatusCode
 						$Reason = $Result.StatusDescription
@@ -763,7 +1169,7 @@ Function New-HDFSItem {
 
 				try {
 					# Returns a boolean
-					[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+					[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
 
 					$StatusCode = $Result.StatusCode
 					$Reason = $Result.StatusDescription
@@ -811,7 +1217,7 @@ Function New-HDFSItem {
 
 				try {
 					# No content returned
-					[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+					[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
 
 					$StatusCode = $Result.StatusCode
 					$Reason = $Result.StatusDescription
@@ -856,12 +1262,46 @@ Function New-HDFSItem {
 
 Function Remove-HDFSItem {
 	<#
+		.SYNOPSIS
+			Removes an HDFS item.
 
+		.DESCRIPTION
+			This cmdlet deletes an HDFS item.
+
+		.PARAMETER Path
+			The path to the item. This can be blank and doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Recursive
+			If the item is a path, if this is specified, deletes all child items as well.
+
+		.PARAMETER PassThru
+			If specified, a boolean will be returned indicating the status of the deletion.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Remove-HDFSItem -Path "/out" -Recursive
+
+			Recursively deletes the folder /out and all its contents.
+
+		.INPUTS
+			System.String
+
+			The path can be piped to this cmdlet.
+
+		.OUTPUTS
+			None or System.Boolean
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "HIGH")]
 	[OutputType([System.Boolean])]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
@@ -927,7 +1367,7 @@ Function Remove-HDFSItem {
 
 		try {
 			# Returns a boolean
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Delete -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Delete -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -967,7 +1407,41 @@ Function Remove-HDFSItem {
 
 Function Add-HDFSContent {
 	<#
+		.SYNOPSIS
+			Appends content to an existing HDFS file.
 
+		.DESCRIPTION
+			This cmdlet will append content to an existing HDFS file.
+
+		.PARAMETER Path
+			The path to the item. This can be blank and doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER InputObject
+			The content to be appended to the existing HDFS file.
+
+		.PARAMTER BufferSize
+			The buffer size used to write the file.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Add-HDFSContent -Path "/input/test.txt" -InputObject "`nTEST2"
+
+			Adds a new line "TEST2" to the test.txt file.
+
+		.INPUTS
+			System.Object
+
+			The content to be appended can be piped to this cmdlet.
+
+		.OUTPUTS
+			None
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType()]
@@ -1038,7 +1512,7 @@ Function Add-HDFSContent {
 		}
 
 		try {
-			[Microsoft.PowerShell.Commands.WebResponseObject]$RedirectResult = Invoke-WebRequest -Uri $Uri -MaximumRedirection 0 -Method Post -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.WebResponseObject]$RedirectResult = Invoke-WebRequest -Uri $Uri -MaximumRedirection 0 -Method Post -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $RedirectResult.StatusCode
 			$Reason = $RedirectResult.StatusDescription
@@ -1065,7 +1539,7 @@ Function Add-HDFSContent {
 				}
 
 				# No content returned
-				[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Post -ErrorAction Stop -UserAgent PowerShell @ContentSplat
+				[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Post -ErrorAction Stop -WebSession $SessionInfo.Session @ContentSplat
 
 				$StatusCode = $Result.StatusCode
 				$Reason = $Result.StatusDescription	
@@ -1104,7 +1578,36 @@ Function Add-HDFSContent {
 
 Function Merge-HDFSItem {
 	<#
+		.SYNOPSIS
+			Concatenates two HDFS files.
 
+		.DESCRIPTION
+			This cmdlet will concatenate the content of two HDFS files.
+
+		.PARAMETER Path
+			The path to the item that will be the concatenation of the sources. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Sources
+			The paths of the source files that will bee concatenated into the destination. These doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Merge-HDFSItem -Path "/input/test.txt" -Sources @("/input/in1.txt", "/input/in2.txt")
+
+			Merges the content of in1.txt and in2.txt into test.txt.
+
+		.INPUTS
+			None
+
+		.OUTPUTS
+			None
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType()]
@@ -1167,7 +1670,7 @@ Function Merge-HDFSItem {
 
 		try
 		{
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -1200,12 +1703,48 @@ Function Merge-HDFSItem {
 
 Function Rename-HDFSItem {
 	<#
+		.SYNOPSIS
+			Renames an HDFS item.
 
+		.DESCRIPTION
+			This cmdlet will rename an HDFS item.
+
+			If a different directory path is specified as the new name, this cmdlet effectively "moves" the item with the new name.
+
+		.PARAMETER Path
+			The path to the item that will that will be renamed. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER NewName
+			The new name of the item that includes the full path.
+
+		.PARAMETER PassThru
+			If this is specifed, a boolean will be returned indicating the success of the rename operation.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Rename-HDFSItem -Path "/input/test.txt" -NewName "/input/test.old.txt"
+
+			Renames test.txt to test.old.txt in the directory 'input'.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			None or System.Boolean
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType()]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNullOrEmpty()]
 		[ValidateScript({
 			$_.Length -gt 2
@@ -1274,7 +1813,7 @@ Function Rename-HDFSItem {
 
 		try
 		{
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -1314,12 +1853,46 @@ Function Rename-HDFSItem {
 
 Function Resize-HDFSItem {
 	<#
+		.SYNOPSIS
+			Truncates an existing HDFS file.
 
+		.DESCRIPTION
+			This cmdlet truncate (reduce in size) an existing HDFS item. This cmdlet cannot expand an item.
+
+		.PARAMETER Path
+			The path to the item that will that will be truncated. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER NewLength
+			The new length of the item in bytes.
+
+		.PARAMETER PassThru
+			If this is specifed, a boolean will be returned indicating the success of the resize operation.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Resize-HDFSItem -Path "/input/test.txt" -NewLength 1024
+
+			Truncates the test.txt file to 1KB
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			None or System.Boolean
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType()]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNullOrEmpty()]
 		[ValidateScript({
 			$_.Length -gt 2
@@ -1381,7 +1954,7 @@ Function Resize-HDFSItem {
 		try
 		{
 			# Returns a boolean
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -1421,13 +1994,71 @@ Function Resize-HDFSItem {
 
 Function Set-HDFSItem {
 	<#
+		.SYNOPSIS
+			Modifies an existing HDFS item.
 
+		.DESCRIPTION
+			This cmdlet will update the permissions, owner, replication factor, group, access time, or modification time of an HDFS item.
 
+		.PARAMETER Path
+			The path to the item that will that will be modified. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Permission
+			The new permissions for the item in OCTAL form.
+
+		.PARAMETER Owner
+			The new owner for the item.
+
+		.PARAMETER Group
+			The new group owner for the item.
+
+		.PARAMETER ReplicationFactor
+			The new replication factor for the HDFS file.
+
+		.PARAMETER AccessTime
+			The new most recent access time of the item.
+
+		.PARAMETER ModificationTime
+			The new most recet modification time of the item.
+
+		.PARAMETER PassThru
+			If this is specifed, a boolean will be returned indicating the success of the update operation.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Set-HDFSItem -Path "/input/test.txt" -Owner hdadmin
+
+			Sets the owner of test.txt to hadmin.
+
+		.EXAMPLE
+			Set-HDFSItem -Path "/input/test.txt" -Permission 777
+
+			Sets the permissions for test.txt to 777.
+
+		.EXAMPLE
+			Set-HDFSItem -Path "/input/test.txt" -ReplicationFactor 2
+
+			Sets the replication factor for test.txt to 2.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			None or System.Boolean
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType([System.Boolean])]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
@@ -1556,12 +2187,12 @@ Function Set-HDFSItem {
 			if ($PSCmdlet.ParameterSetName -eq "Replication")
 			{
 				# Returns a boolean
-				[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+				[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
 			}
 			else
 			{
 				# No content returned for all other changes
-				[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+				[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
 			}
 
 			$StatusCode = $Result.StatusCode
@@ -1713,7 +2344,7 @@ Function Set-HDFSAcl {
 		try
 		{
 			# No content returned
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -1802,7 +2433,7 @@ Function Get-HDFSAcl {
 
 		try
 		{
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -1900,7 +2531,7 @@ Function Test-HDFSAccess {
 
 		try
 		{
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -2010,7 +2641,7 @@ Function Get-HDFSStoragePolicy {
 
 		try
 		{
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -2117,7 +2748,7 @@ Function Set-HDFSStoragePolicy {
 		try
 		{
 			# No content returned
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -2208,7 +2839,7 @@ Function Remove-HDFSStoragePolicy {
 		try
 		{
 			# No content returned
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -2337,7 +2968,7 @@ Function Get-HDFSXAttr {
 
 		try
 		{			
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -2461,7 +3092,7 @@ Function Set-HDFSXAttr {
 		try
 		{
 			# No content returned
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -2556,7 +3187,7 @@ Function Remove-HDFSXAttr {
 		try
 		{
 			# No content returned
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -2656,7 +3287,7 @@ Function New-HDFSSnapshot {
 		try
 		{
 			# Returns the path to the snapshot
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -2754,7 +3385,7 @@ Function Remove-HDFSSnapshot {
 		try
 		{
 			# No content returned
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Delete -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Delete -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -2852,7 +3483,7 @@ Function Rename-HDFSSnapshot {
 		try
 		{
 			# No content returned
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -2929,7 +3560,6 @@ Function Get-HDFSDelegationToken {
 
 		[System.String]$Uri = "$($SessionInfo.BaseUrl)/?op=GETDELEGATIONTOKEN&renewer=$User&service=$Service&kind=$Kind"
 
-		<#
 		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
 		{
 			$Uri += "&user.name=$($SessionInfo.User)"
@@ -2938,12 +3568,11 @@ Function Get-HDFSDelegationToken {
 		{
 			$Uri += "&delegation=$($SessionInfo.Delegation)"
 		}
-		#>
 
 		try
 		{
 			# Returns the token
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -3018,7 +3647,7 @@ Function Update-HDFSDelegationToken {
 		try
 		{
 			# Returns the updated expiration time
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -3093,7 +3722,7 @@ Function Revoke-HDFSDelegationToken {
 		try
 		{
 			# No content returned
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -UserAgent PowerShell
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
