@@ -1,13 +1,11 @@
 # HDFS
 
 ## Information
-The cmdlets have been written against Hadoop version 2.8.1. They have not been configured or tested to support Kerberos authentication, but allow you to specify
-a base64 encoded string for the NEGOTIATE authorization header.
+The cmdlets have been written against Hadoop version 2.8.1, but include updates for version 2.9.0. They have not been configured or tested to support Kerberos authentication, but allow you to specify a base64 encoded string for the NEGOTIATE authorization header.
 
 ## Usage
 
-The below shows some of the usage of the cmdlets. The Path parameter does not need to be prefaced with a leading "/", so you can specify "/home/file.txt" or "home/file.txt" and they 
-are both interpreted the same way.
+The below shows some of the usage of the cmdlets. The Path parameter does not need to be prefaced with a leading "/", so you can specify "/home/file.txt" or "home/file.txt" and they  are both interpreted the same way.
 
 ### Setup A Session
 
@@ -18,25 +16,40 @@ are both interpreted the same way.
 
     Set-HDFSItem -Path "/" -Owner "hdadmin"
 
+Sets the owner of the root directory to hdadmin.
+
     Remove-HDFSItem -Path "/test" -Recursive
+
+Deletes the directory /test and all of its children.
 
     New-HDFSItem -Path "/test" -ItemType Directory
 
+Creates the directory /test.
+
     Set-HDFSAcl -Path "/test" -Acl "user::rwx,group::rwx,other::rwx" -Replace
+
+Sets the permissions for /test to 777.
 
     New-HDFSItem -Path "/test/test.txt" -ItemType File -InputObject "TESTING"
 
-    Set-HDFSAcl -Path "/test/test.txt" -Acl "user::rwx,group::rwx,other::rwx" -Replace
+Creates a new file with the content of TESTING.
 
     Get-HDFSContent -Path "/test/test.txt" -Encoding ([System.Text.Encoding]::UTF8)
+
+Retrieves the content of the test.txt file and encodes the byte stream as UTF8.
 
     Add-HDFSContent -Path "/test/test.txt" -InputObject "`nTEST2`n"
     Get-HDFSContent -Path "/test/test.txt" -Encoding ([System.Text.Encoding]::UTF8)
 
+Adds content to the test.txt file and gets the updated content as UTF8.
+
     Rename-HDFSItem -Path "/test/test.txt" -NewName "/test/test2.txt" -Verbose
-    Get-HDFSContent -Path "/test/test2.txt" -Encoding ([System.Text.Encoding]::UTF8)
+
+Renames the test.txt file to test2.txt.
 
     Get-HDFSHomeDirectory
+
+Gets the current home directory.
 
 ### Extended Attribute Cmdlets
 

@@ -422,7 +422,7 @@ Function Get-HDFSItem {
 
 		try {
 
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -MaximumRedirection 2 -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription
@@ -459,9 +459,9 @@ Function Get-HDFSItem {
 					break
 				}
 				"Checksum" {
-					$Checksum = ([PSCustomObject](ConvertFrom-Json -InputObject $Result.Content).FileChecksum)
-					$Checksum | Add-Member -MemberType NoteProperty -Name "name" -Value $Path
-					Write-Output -InputObject $Checksum
+					$Check = ([PSCustomObject](ConvertFrom-Json -InputObject $Result.Content).FileChecksum)
+					$Check | Add-Member -MemberType NoteProperty -Name "name" -Value $Path
+					Write-Output -InputObject $Check
 					break
 				}
 			}
@@ -624,7 +624,7 @@ Function Get-HDFSContent {
 
 		try {
 			# Returns an octet stream
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -MaximumRedirection 2 -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription
@@ -673,7 +673,7 @@ Function Get-HDFSContent {
 				}
 			}
 
-			Write-Warning -Message "There was an issue getting the item: $StatusCode $Reason - $Message"
+			Write-Warning -Message "There was an issue getting the item's content: $StatusCode $Reason - $Message"
 		}
 	}
 
@@ -692,6 +692,9 @@ Function Get-HDFSChildItem {
 
 		.PARAMETER Path
 			The path to the item. This can be blank and doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Batch
+			Iteratively lists the contents of a path. Batch size is controlled by the dfs.ls.limit option on the NameNode.
 
 		.PARAMETER Session
 			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
@@ -714,13 +717,16 @@ Function Get-HDFSChildItem {
             AUTHOR: Michael Haken
 			LAST UPDATE: 11/19/2017
 	#>
-	[CmdletBinding()]
+	[CmdletBinding(DefaultParameterSetName = "List")]
 	[OutputType([System.Management.Automation.PSCustomObject[]])]
 	Param(
 		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
+
+		[Parameter(ParameterSetName = "Batch")]
+		[Switch]$Batch,
 
 		[Parameter()]
 		[ValidateScript({
@@ -756,7 +762,23 @@ Function Get-HDFSChildItem {
 			}
 		}
 
-		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=LISTSTATUS"
+		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path"
+		
+		switch ($PSCmdlet.ParameterSetName)
+		{
+			"List" {
+				$Uri += "?op=LISTSTATUS"
+				break
+			}
+			"Batch" {
+				$Uri += "?op=LISTSTATUS_BATCH"
+				break
+			}
+			default {
+				throw "Unknown parameter set."
+			}
+		}
+		
 
 		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
 		{
@@ -789,7 +811,32 @@ Function Get-HDFSChildItem {
 
 		if ($StatusCode -eq 200)
 		{
-			Write-Output -InputObject ([PSCustomObject[]](ConvertFrom-Json -InputObject $Result.Content).FileStatuses.FileStatus)
+			switch ($PSCmdlet.ParameterSetName)
+			{
+				"List" {
+					Write-Output -InputObject ([PSCustomObject[]](ConvertFrom-Json -InputObject $Result.Content).FileStatuses.FileStatus)
+					break
+				}
+				"Batch" {
+					[PSCustomObject[]]$Items = @()
+					$Temp = (ConvertFrom-Json -InputObject $Result.Content).DirectoryListing
+					$Remaining = $Temp.RemainingEntries
+
+					$Items += $Temp.PartialListing.FileStatuses.FileStatus
+					$Base = $Uri
+
+					while ($Remaining > 0)
+					{
+						$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
+						$Temp = (ConvertFrom-Json -InputObject $Result.Content).DirectoryListing
+						$Items +=  $Temp.PartialListing.FileStatuses.FileStatus
+						$Remaining = $Temp.RemainingEntries
+						$Uri = "$Base&startAfter=$($Temp.FileStatuses.FileStatus | Select-Object -Last -ExpandProperty pathSuffix)"
+					}
+
+					Write-Output -InputObject $Items
+				}
+			}
 		}
 		else
 		{
@@ -888,11 +935,131 @@ Function Get-HDFSHomeDirectory {
 
 		if ($StatusCode -eq 200)
 		{
-			Write-Output -InputObject ([PSCustomObject[]](ConvertFrom-Json -InputObject $Result.Content).Path)
+			Write-Output -InputObject ([System.String](ConvertFrom-Json -InputObject $Result.Content).Path)
 		}
 		else
 		{
 			Write-Warning -Message "There was an issue getting the home directory: $StatusCode $Reason - $($Result.Content)"
+		}
+	}
+
+	End {
+	}
+}
+
+Function Get-HDFSTrashRoot {
+	<#
+		.SYNOPSIS
+			Gets the HDFS trash root.
+
+		.DESCRIPTION
+			This cmdlet gets the currently configured HDFS trash root.
+
+		.PARAMETER Path
+			The path of the item to get the trash root of.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Get-HDFSTrashRoot
+
+			Gets the HDFS trash root.
+
+		.INPUTS
+			System.String
+
+			The path can be piped to this cmdlet.
+
+		.OUTPUTS
+			System.String
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
+	#>
+	[CmdletBinding()]
+	[OutputType([System.String])]
+	Param(
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+		[ValidateNotNull()]
+		[AllowEmptyString()]
+		[System.String]$Path,
+
+		[Parameter()]
+		[ValidateScript({
+			$script:Sessions.ContainsKey($_.ToLower())
+		})]
+		[System.String]$Session = [System.String]::Empty
+	)
+
+	Begin {
+
+	}
+
+	Process {
+		[System.Collections.Hashtable]$SessionInfo = $null
+
+        if (-not [System.String]::IsNullOrEmpty($Session)) {
+            $SessionInfo = $script:Sessions.Get_Item($Session)
+        }
+        else {
+            $SessionInfo = $script:Sessions.GetEnumerator() | Select-Object -First 1 -ExpandProperty Value
+			$Session = $SessionInfo.Server
+        }
+
+		if ($Path.StartsWith("/"))
+		{
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
+		}
+
+		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=GETTRASHROOT"
+
+		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+		{
+			$Uri += "&user.name=$($SessionInfo.User)"
+		}
+		elseif($SessionInfo.ContainsKey("Delegation"))
+		{
+			$Uri += "&delegation=$($SessionInfo.Delegation)"
+		}
+
+		try{
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
+
+			$StatusCode = $Result.StatusCode
+			$Reason = $Result.StatusDescription
+		}
+		catch [System.Net.WebException] {
+			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+			$StatusCode = [System.Int32]$Response.StatusCode
+			
+			[System.IO.Stream]$Stream = $Response.GetResponseStream()
+			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+			$Content = $Reader.ReadToEnd()
+
+			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+		}
+		catch [Exception]  {
+			$Reason = $_.Exception.Message
+		}
+
+		if ($StatusCode -eq 200)
+		{
+			Write-Output -InputObject ([System.String](ConvertFrom-Json -InputObject $Result.Content).Path)
+		}
+		else
+		{
+			Write-Warning -Message "There was an issue getting the trash root: $StatusCode $Reason - $($Result.Content)"
 		}
 	}
 
@@ -1670,7 +1837,7 @@ Function Merge-HDFSItem {
 
 		try
 		{
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -ErrorAction Stop -WebSession $SessionInfo.Session
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -MaximumRedirection 2 -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -1954,7 +2121,7 @@ Function Resize-HDFSItem {
 		try
 		{
 			# Returns a boolean
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -ErrorAction Stop -WebSession $SessionInfo.Session
+			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -MaximumRedirection 2 -ErrorAction Stop -WebSession $SessionInfo.Session
 
 			$StatusCode = $Result.StatusCode
 			$Reason = $Result.StatusDescription	
@@ -2232,13 +2399,58 @@ Function Set-HDFSItem {
 
 Function Set-HDFSAcl {
 	<#
+		.SYNOPSIS
+			Sets or modifies the ACL on an HDFS item.
 
+		.DESCRIPTION
+			This cmdlet will update, replace, or remove HDFS item ACLs.
 
+		.PARAMETER Path
+			The path to the item that will that will be modified. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Acl
+			The ACLs to apply to the item. Each of these should be in human readable format, like "user::rwx,group::rwx,other::rwx".
+
+		.PARAMETER Update
+			This will update the existing ACLs.
+
+		.PARAMETER Replace
+			This will replace the existing ACLs with the provided ones.
+
+		.PARAMETER Remove
+			This will remove the provided ACLs from the specified path.
+
+		.PARAMETER RemoveDefaultAcl
+			Removes the default ACL from the item.
+
+		.PARAMETER RemoveAll
+			Removes all ACLs from the item.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Set-HDFSAcl -Path "/test" -Acl "user::rwx,group::rwx,other::rwx" -Replace 
+
+			This replaces the current ACL with the provided one, which is effectively 777.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			None
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "HIGH")]
 	[OutputType([System.Boolean])]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
@@ -2376,7 +2588,47 @@ Function Set-HDFSAcl {
 
 Function Get-HDFSAcl {
 	<#
+		.SYNOPSIS
+			Sets or modifies the ACL on an HDFS item.
 
+		.DESCRIPTION
+			This cmdlet will update, replace, or remove HDFS item ACLs.
+
+		.PARAMETER Path
+			The path to the item to get the ACL of. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Get-HDFSAcl -Path "/test"
+
+			Gets the ACL of "/test".
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			System.Management.Automation.PSCustomObject
+
+			This is a JSON reprentation of the output:
+			{
+				"entries": [
+					"user:carla:rw-", 
+					"group::r-x"
+				], 
+				"group": "supergroup", 
+				"owner": "hadoop", 
+				"permission":"775",
+				"stickyBit": false
+			}
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType([PSCustomObject])]
@@ -2470,7 +2722,38 @@ Function Get-HDFSAcl {
 
 Function Test-HDFSAccess {
 	<#
+		.SYNOPSIS
+			Tests access to an HDFS item.
 
+		.DESCRIPTION
+			This cmdlet test the supplied action and return a value of true or false if the user is allowed the specified action.
+
+		.PARAMETER Path
+			The path to the item to test access to. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Action
+			The action to test the access of. This is in the format of rwx, or a combination of those and '-', like r-x.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Test-HDFSAccess -Path "/test" -Action "rwx"
+
+			Tests read, write, execute access against the "/test" item.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			System.Boolean
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType([System.Boolean])]
@@ -2569,12 +2852,68 @@ Function Test-HDFSAccess {
 
 Function Get-HDFSStoragePolicy {
 	<#
+		.SYNOPSIS
+			Gets the storage policy associated with an item or all policies.
 
+		.DESCRIPTION
+			This cmdlet gets the storage policy associated with an item. If a path isn't specified, it retrieves all storage policies.
+
+		.PARAMETER Path
+			The path to the item to get the storage policy of. This doesn't need to be prefaced with a '/', but can be.
+
+			If the path isn't specified, the cmdlet retrieves all storage policies.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Get-HDFSStoragePolicy -Path "/test"
+
+			Gets the storage policy associated with the test directory.
+
+		.EXAMPLE
+			Get-HDFSStoragePolicy
+
+			Gets all storage policies.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			System.Management.Automation.PSCustomObject or System.Management.Automation.PSCustomObject[]
+
+			This is a JSON representation of the output:
+
+			[
+				{
+				   "copyOnCreateFile": false,
+				   "creationFallbacks": [],
+				   "id": 2,
+				   "name": "COLD",
+				   "replicationFallbacks": [],
+				   "storageTypes": ["ARCHIVE"]
+			   },
+			   {
+				   "copyOnCreateFile": false,
+				   "creationFallbacks": ["DISK","ARCHIVE"],
+				   "id": 5,
+				   "name": "WARM",
+				   "replicationFallbacks": ["DISK","ARCHIVE"],
+				   "storageTypes": ["DISK","ARCHIVE"]
+				}
+			]
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding(DefaultParameterSetName = "All")]
 	[OutputType([System.Management.Automation.PSCustomObject], [System.Management.Automation.PSCustomObject[]])]
 	Param(
-		[Parameter(ParameterSetName = "Path", Mandatory = $true)]
+		[Parameter(ParameterSetName = "Path", Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
@@ -2687,12 +3026,43 @@ Function Get-HDFSStoragePolicy {
 
 Function Set-HDFSStoragePolicy {
 	<#
+		.SYNOPSIS
+			Sets the storage policy on an HDFS item.
 
+		.DESCRIPTION
+			This cmdlet sets a storage policy on an HDFS item.
+
+		.PARAMETER Path
+			The path to the item to set the storage policy on. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMTER Policy
+			The name of the policy to set.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Set-HDFSStoragePolicy -Path "/test" -Policy WARM
+
+			Sets the storage policy of the "/test" directory to WARM.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			None		
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "HIGH")]
 	[OutputType()]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
@@ -2781,12 +3151,40 @@ Function Set-HDFSStoragePolicy {
 
 Function Remove-HDFSStoragePolicy {
 	<#
+		.SYNOPSIS
+			Removes a storage policy on an HDFS item.
 
+		.DESCRIPTION
+			This cmdlet removes the storage policy associated with an HDFS item.
+
+		.PARAMETER Path
+			The path to the item to remove the storage policy from. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Remove-HDFSStoragePolicy -Path "/test" 
+
+			Removes the storage policy of the "/test" directory.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			None		
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "HIGH")]
 	[OutputType()]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
@@ -2870,14 +3268,207 @@ Function Remove-HDFSStoragePolicy {
 	}
 }
 
-Function Get-HDFSXAttr {
+Function Get-HDFSFileBlockLocations {
 	<#
+		.SYNOPSIS
+			Gets the locations of a file's blocks.
 
+		.DESCRIPTION
+			This cmdlet gets the locations of a file's blocks.
+
+		.PARAMETER Path
+			The path to the item. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Get-HDFSFileBlockLocations -Path "/test/data.txt"
+
+			Gets the file block locations of the data.txt file.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			System.Management.Automation.PSCustomObject[]
+
+			This is a json representation of the output:
+
+			[
+			  {
+				"cachedHosts" : [],
+				"corrupt" : false,
+				"hosts" : ["host"],
+				"length" : 134217728,                             // length of this block
+				"names" : ["host:ip"],
+				"offset" : 0,                                     // offset of the block in the file
+				"storageIds" : ["storageid"],
+				"storageTypes" : ["DISK"],                        // enum {RAM_DISK, SSD, DISK, ARCHIVE}
+				"topologyPaths" : ["/default-rack/hostname:ip"]
+			  }, {
+				"cachedHosts" : [],
+				"corrupt" : false,
+				"hosts" : ["host"],
+				"length" : 62599364,
+				"names" : ["host:ip"],
+				"offset" : 134217728,
+				"storageIds" : ["storageid"],
+				"storageTypes" : ["DISK"],
+				"topologyPaths" : ["/default-rack/hostname:ip"]
+			  },
+			  ...
+			]
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
-	[CmdletBinding(DefaultParameterSetName = "Name")]
-	[OutputType()]
+	[CmdletBinding()]
+	[OutputType([System.Boolean])]
 	Param(
 		[Parameter(Mandatory = $true)]
+		[ValidateNotNullOrEmpty()]
+		[ValidateScript({
+			$_.Length -gt 2
+		})]
+		[System.String]$Path,
+
+		[Parameter()]
+		[ValidateScript({
+			$script:Sessions.ContainsKey($_.ToLower())
+		})]
+		[System.String]$Session = [System.String]::Empty
+	)
+
+	Begin {
+
+	}
+
+	Process {
+		[System.Collections.Hashtable]$SessionInfo = $null
+
+        if (-not [System.String]::IsNullOrEmpty($Session)) {
+            $SessionInfo = $script:Sessions.Get_Item($Session)
+        }
+        else {
+            $SessionInfo = $script:Sessions.GetEnumerator() | Select-Object -First 1 -ExpandProperty Value
+			$Session = $SessionInfo.Server
+        }
+
+		if ($Path.StartsWith("/"))
+		{
+			if ($Path.Length -gt 1)
+			{
+				$Path = $Path.Substring(1)
+			}
+			else
+			{
+				$Path = [System.String]::Empty
+			}
+		}
+
+		[System.String]$Uri = "$($SessionInfo.BaseUrl)/$Path`?op=GETFILEBLOCKLOCATIONS"
+
+		if ($SessionInfo.ContainsKey("User") -and -not [System.String]::IsNullOrEmpty($SessionInfo.User))
+		{
+			$Uri += "&user.name=$($SessionInfo.User)"
+		}
+		elseif($SessionInfo.ContainsKey("Delegation"))
+		{
+			$Uri += "&delegation=$($SessionInfo.Delegation)"
+		}
+
+		try
+		{
+			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Get -ErrorAction Stop -WebSession $SessionInfo.Session
+
+			$StatusCode = $Result.StatusCode
+			$Reason = $Result.StatusDescription	
+		}
+		catch [System.Net.WebException] {
+			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
+			$StatusCode = [System.Int32]$Response.StatusCode
+			
+			[System.IO.Stream]$Stream = $Response.GetResponseStream()
+			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+			$Content = $Reader.ReadToEnd()
+
+			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+		}
+		catch [Exception]  {
+			$Reason = $_.Exception.Message
+		}
+
+		if ($StatusCode -eq 200)
+		{
+			Write-Output -InputObject ([PSCustomObject](ConvertFrom-Json -InputObject $Result.Content)).BlockLocations.BlockLocation
+		}
+		else
+		{
+			Write-Warning -Message "The was an issue getting the file block locations: $StatusCode $Reason - $($Result.Content)"
+		}
+	}
+
+	End {
+
+	}
+}
+
+Function Get-HDFSXAttr {
+	<#
+		.SYNOPSIS
+			Gets an HDFS item's extended attributes.
+
+		.DESCRIPTION
+			This cmdlet gets the extended attributes of an HDFS item or lists all available extended attributes names that have been set on the item.
+
+		.PARAMETER Path
+			The path to the item to get the extended attributes of. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Names
+			The names of the extended attributes to retrieve. If this is not specified, all extended attributes of the item are returned.
+
+		.PARAMETER Encoding
+			Specifies how the extended attribute values are encoded and displayed.
+
+		.PARAMETER ListAvailable
+			If this is specified, the extended attribute names that have been set are returned.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Get-HDFSXAttr -Names "user.name" -Path "/test/data.txt"
+
+			Gets the user.name extended attribute on /test/data.txt
+
+		.EXAMPLE
+			Get-HDFSXAttr -Path "/test/data.txt"
+
+			Gets all of the extended attributes of the /test/data.txt item
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			System.Management.Automation.PSCustomObject[] or System.String[]	
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
+	#>
+	[CmdletBinding(DefaultParameterSetName = "Name")]
+	[OutputType([System.Management.Automation.PSCustomObject[]], [System.String[]])]
+	Param(
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
@@ -3016,12 +3607,50 @@ Function Get-HDFSXAttr {
 
 Function Set-HDFSXAttr {
 	<#
+		.SYNOPSIS
+			Sets an HDFS item's extended attribute.
 
+		.DESCRIPTION
+			This cmdlet sets an extended attribute of an HDFS item.
+
+		.PARAMETER Path
+			The path to the item to set the extended attributes of. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Name
+			The name of the extended attribute to set.
+
+		.PARAMETER Value
+			The value of the extended attribute.
+
+		.PARAMETER Flag
+			Specifies whether this extended attribute is being created or replaced. If you specify create and it already exists, an error will occur. If you
+			specify replace and it doesn't exist, an error will occur.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Set-HDFSXAttr -Name "user.name" -Value "john.smith" -Path "/test/data.txt" -Flag CREATE
+
+			Sets the user.name extended attribute on /test/data.txt as a new attribute.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+		
+		.OUTPUTS
+			None
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType()]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
@@ -3032,7 +3661,8 @@ Function Set-HDFSXAttr {
 		[System.String]$Name,
 
 		[Parameter(Mandatory = $true)]
-		[ValidateNotNullOrEmpty()]
+		[ValidateNotNull()]
+		[AllowEmptyString()]
 		[System.String]$Value,
 
 		[Parameter(Mandatory = $true)]
@@ -3125,12 +3755,43 @@ Function Set-HDFSXAttr {
 
 Function Remove-HDFSXAttr {
 	<#
+		.SYNOPSIS
+			Removes an HDFS item's extended attribute.
 
+		.DESCRIPTION
+			This cmdlet removes an extended attribute of an HDFS item.
+
+		.PARAMETER Path
+			The path to the item to remove the extended attributes of. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Name
+			The name of the extended attribute to remove.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Remove-HDFSXAttr -Name "user.name" -Path "/test/data.txt"
+
+			Removes the user.name extended attribute on /test/data.txt.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			None
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType()]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
@@ -3220,12 +3881,43 @@ Function Remove-HDFSXAttr {
 
 Function New-HDFSSnapshot {
 	<#
+		.SYNOPSIS
+			Creates a new HDFS snapshot.
 
+		.DESCRIPTION
+			This cmdlet creates a new HDFS snapshot.
+
+		.PARAMETER Path
+			The path to the item to snapshot. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Name
+			The name of the snapshot that will be created to be used for easier identification later.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			New-HDFSSnapshot -Name "FirstSnapshot" -Path "/test/data.txt"
+
+			Creates a snapshot of /test/data.txt called FirstSnapshot.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			None
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType()]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
@@ -3323,7 +4015,38 @@ Function New-HDFSSnapshot {
 
 Function Remove-HDFSSnapshot {
 	<#
+		.SYNOPSIS
+			Removes an HDFS item snapshot.
 
+		.DESCRIPTION
+			This cmdlet deletes an HDFS item snapshot.
+
+		.PARAMETER Path
+			The path to the item to remove the snapshot of. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Name
+			The name of the snapshot to delete.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Remove-HDFSSnapshot -Name "MyFirstSnapshot" -Path "/test/data.txt"
+
+			Deletes the MyFirstSnaphot snapshot of /test/data.txt.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			None
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType()]
@@ -3417,21 +4140,55 @@ Function Remove-HDFSSnapshot {
 
 Function Rename-HDFSSnapshot {
 	<#
+		.SYNOPSIS
+			Renames an HDFS snapshot.
 
+		.DESCRIPTION
+			This cmdlet renames an HDFS snapshot.
+
+		.PARAMETER Path
+			The path to the item whose snapshot needs to be renamed. This doesn't need to be prefaced with a '/', but can be.
+
+		.PARAMETER Name
+			The name of the snapshot to rename.
+
+		.PARAMETER NewName
+			The new name of the snapshot.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Rename-HDFSSnapshot -Name "MyFirstSnapshot" -NewName "2017-01-01_Snap" -Path "/test/data.txt"
+
+			Renames the specified snaphot.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			None
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType()]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true, Position = 2)]
 		[ValidateNotNull()]
 		[AllowEmptyString()]
 		[System.String]$Path,
 
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, Position = 0)]
 		[ValidateNotNullOrEmpty()]
 		[System.String]$Name,
 
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, Position = 1)]
 		[ValidateNotNullOrEmpty()]
 		[System.String]$NewName,
 
@@ -3515,11 +4272,41 @@ Function Rename-HDFSSnapshot {
 
 Function Get-HDFSDelegationToken {
 	<#
+		.SYNOPSIS
+			Gets an HDFS delegation token.
+
+		.DESCRIPTION
+			This cmdlet gets an HDFS delegation token.
+
+		.PARAMETER User
+			The renewer of the delegation token.
+
 		.PARAMETER Kind
-			A string that represents token kind e.g “HDFS_DELEGATION_TOKEN” or “WEBHDFS delegation”
+			A string that represents token kind e.g “HDFS_DELEGATION_TOKEN” or “WEBHDFS delegation”.
 
 		.PARAMETER Service
-			The name of the service where the token is supposed to be used, e.g. ip:port of the namenode
+			The name of the service where the token is supposed to be used, e.g. ip:port of the namenode.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Get-HDFSDelegationToken -Kind HDFS_DELEGATION_TOKEN -Service hdserver:9000 -User hdadmin
+
+			Gets a delegation token from the namenode server.
+
+		.INPUTS
+			System.String
+
+			The path of the item can be piped to this cmdlet.
+
+		.OUTPUTS
+			System.String
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType([System.String])]
@@ -3608,12 +4395,43 @@ Function Get-HDFSDelegationToken {
 
 Function Update-HDFSDelegationToken {
 	<#
-	
+		.SYNOPSIS
+			Renews an HDFS delegation token.
+
+		.DESCRIPTION
+			This cmdlet renews an HDFS delegation token.
+
+		.PARAMETER Token
+			The current token string.
+
+		.PARAMETER PassThru
+			If specified, the new expiration date as a Unix timestamp is returned.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Renew-HDFSDelegationToken -Token $Token
+
+			Renews the token contained in the $Token variable.
+
+		.INPUTS
+			System.String
+
+			The token to be renewed can be piped to this cmdlet.
+
+		.OUTPUTS
+			System.String
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType([System.Int64])]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNullOrEmpty()]
 		[System.String]$Token,
 
@@ -3686,12 +4504,40 @@ Function Update-HDFSDelegationToken {
 
 Function Revoke-HDFSDelegationToken {
 	<#
-	
+		.SYNOPSIS
+			Cancels an HDFS delegation token.
+
+		.DESCRIPTION
+			This cmdlet cancels an HDFS delegation token.
+
+		.PARAMETER Token
+			The current token string.
+
+		.PARAMETER Session
+			The session identifier of the HDFS session created by New-HDFSSession. If this is not specified, the first established
+			session is utilized.
+
+		.EXAMPLE
+			Revoke-HDFSDelegationToken -Token $Token
+
+			Cancels the token contained in the $Token variable.
+
+		.INPUTS
+			System.String
+
+			The token to be cancelled can be piped to this cmdlet.
+
+		.OUTPUTS
+			None
+
+		.NOTES
+            AUTHOR: Michael Haken
+			LAST UPDATE: 11/19/2017
 	#>
 	[CmdletBinding()]
 	[OutputType()]
 	Param(
-		[Parameter(Mandatory = $true)]
+		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
 		[ValidateNotNullOrEmpty()]
 		[System.String]$Token,
 
