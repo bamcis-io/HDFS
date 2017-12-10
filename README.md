@@ -1,11 +1,13 @@
 # HDFS
 
 ## Information
-The cmdlets have been written against Hadoop version 2.8.1, but include updates for version 2.9.0. They have not been configured or tested to support Kerberos authentication, but allow you to specify a base64 encoded string for the NEGOTIATE authorization header.
+The cmdlets have been written and tested against Hadoop version 2.8.1, but include all API calls defined in version 2.9.0. They have not been configured or tested to support Kerberos authentication, but allow you to specify a base64 encoded string for the NEGOTIATE authorization header.
 
 ## Usage
 
 The below shows some of the usage of the cmdlets. The Path parameter does not need to be prefaced with a leading "/", so you can specify "/home/file.txt" or "home/file.txt" and they  are both interpreted the same way.
+
+All cmdlets by default will execute Write-Warning when an error is encountered. To cause the cmdlet to throw an exception instead, use the -ErrorAction Stop parameter.
 
 ### Setup A Session
 
@@ -59,6 +61,9 @@ Gets the current home directory.
     Remove-HDFSXAttr -Path "" -Name "user.test"
 
 ## Revision History
+
+### 1.0.0.1
+Improved error handling. Added -Confirm and -Force functionality where applicable.
 
 ### 1.0.0.0
 Initial Release.

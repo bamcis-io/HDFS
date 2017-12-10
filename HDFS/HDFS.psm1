@@ -155,15 +155,25 @@ Function New-HDFSSession {
 					$Reason = $Result.StatusDescription
 				}
 				catch [System.Net.WebException] {
-					[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-					$StatusCode = [System.Int32]$Response.StatusCode
-			
-					[System.IO.Stream]$Stream = $Response.GetResponseStream()
-					[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-					[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-					$Content = $Reader.ReadToEnd()
+					[System.Net.WebException]$Ex = $_.Exception
 
-					$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+					if ($Ex.Response -eq $null)
+					{
+						$Reason = "$($Ex.Status): $($Ex.Message)"
+						$StatusCode = 500
+					}
+					else
+					{
+						[System.Net.HttpWebResponse]$Response = $Ex.Response
+						$StatusCode = [System.Int32]$Response.StatusCode
+			
+						[System.IO.Stream]$Stream = $Response.GetResponseStream()
+						[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+						[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+						$Content = $Reader.ReadToEnd()
+
+						$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+					}
 				}
 				catch [Exception]  {
 					$Reason = $_.Exception.Message
@@ -171,7 +181,14 @@ Function New-HDFSSession {
 
 				if ($StatusCode -ne 200)
 				{
-					Write-Warning -Message "There was an issue initializing the HDFS session: $StatusCode $Reason - $($Result.Content)"
+					if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+					{
+						throw "There was an issue initializing the HDFS session: $StatusCode $Reason - $($Result.Content)"
+					}
+					else
+					{
+						Write-Warning -Message "There was an issue initializing the HDFS session: $StatusCode $Reason - $($Result.Content)"
+					}
 				}
 			}
 
@@ -182,7 +199,14 @@ Function New-HDFSSession {
 		}
 		else
 		{
-			Write-Warning -Message "There is already a session for $Namenode, please remove this session with 'Remove-HDFSSession -Session $Namenode' in order to setup a new session."
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There is already a session for $Namenode, please remove this session with 'Remove-HDFSSession -Session $Namenode' in order to setup a new session."
+			}
+			else
+			{
+				Write-Warning -Message "There is already a session for $Namenode, please remove this session with 'Remove-HDFSSession -Session $Namenode' in order to setup a new session."
+			}
 		}
 	}
 
@@ -428,15 +452,25 @@ Function Get-HDFSItem {
 			$Reason = $Result.StatusDescription
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -453,9 +487,9 @@ Function Get-HDFSItem {
 					break
 				}
 				"Summary" {
-					$Summary = ([PSCustomObject](ConvertFrom-Json -InputObject $Result.Content).ContentSummary)
-					$Summary | Add-Member -MemberType NoteProperty -Name "name" -Value $Path
-					Write-Output -InputObject $Summary
+					$Summ = ([PSCustomObject](ConvertFrom-Json -InputObject $Result.Content).ContentSummary)
+					$Summ | Add-Member -MemberType NoteProperty -Name "name" -Value $Path
+					Write-Output -InputObject $Summ
 					break
 				}
 				"Checksum" {
@@ -482,7 +516,14 @@ Function Get-HDFSItem {
 				}
 			}
 
-			Write-Warning -Message "There was an issue getting the item: $StatusCode $Reason - $Message"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue getting the item: $StatusCode $Reason - $Message"
+			}
+			else
+			{
+				Write-Warning -Message "There was an issue getting the item: $StatusCode $Reason - $Message"
+			}
 		}
 	}
 
@@ -630,15 +671,25 @@ Function Get-HDFSContent {
 			$Reason = $Result.StatusDescription
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -673,7 +724,14 @@ Function Get-HDFSContent {
 				}
 			}
 
-			Write-Warning -Message "There was an issue getting the item's content: $StatusCode $Reason - $Message"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue getting the item's content: $StatusCode $Reason - $Message"
+			}
+			else
+			{
+				Write-Warning -Message "There was an issue getting the item's content: $StatusCode $Reason - $Message"
+			}
 		}
 	}
 
@@ -795,15 +853,25 @@ Function Get-HDFSChildItem {
 			$Reason = $Result.StatusDescription
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -840,7 +908,21 @@ Function Get-HDFSChildItem {
 		}
 		else
 		{
-			Write-Warning -Message "There was an issue getting the child items: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue getting the child items: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+				{
+					throw "There was an issue getting the child items: $StatusCode $Reason - $($Result.Content)"
+				}
+				else
+				{
+					Write-Warning -Message "There was an issue getting the child items: $StatusCode $Reason - $($Result.Content)"
+				}
+			}
 		}
 	}
 
@@ -919,14 +1001,24 @@ Function Get-HDFSHomeDirectory {
 			$Reason = $Result.StatusDescription
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+			}
+			
 			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
 		}
 		catch [Exception]  {
@@ -939,7 +1031,14 @@ Function Get-HDFSHomeDirectory {
 		}
 		else
 		{
-			Write-Warning -Message "There was an issue getting the home directory: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue getting the home directory: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "There was an issue getting the home directory: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -1039,14 +1138,24 @@ Function Get-HDFSTrashRoot {
 			$Reason = $Result.StatusDescription
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+			}
+			
 			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
 		}
 		catch [Exception]  {
@@ -1059,7 +1168,14 @@ Function Get-HDFSTrashRoot {
 		}
 		else
 		{
-			Write-Warning -Message "There was an issue getting the trash root: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue getting the trash root: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "There was an issue getting the trash root: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -1280,14 +1396,24 @@ Function New-HDFSItem {
 					}
 				}
 				catch [System.Net.WebException] {
-					[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-					$StatusCode = [System.Int32]$Response.StatusCode
-					
-					[System.IO.Stream]$Stream = $Response.GetResponseStream()
-					[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-					[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-					$Content = $Reader.ReadToEnd()
+					[System.Net.WebException]$Ex = $_.Exception
 
+					if ($Ex.Response -eq $null)
+					{
+						$Reason = "$($Ex.Status): $($Ex.Message)"
+						$StatusCode = 500
+					}
+					else
+					{
+						[System.Net.HttpWebResponse]$Response = $Ex.Response
+						$StatusCode = [System.Int32]$Response.StatusCode
+			
+						[System.IO.Stream]$Stream = $Response.GetResponseStream()
+						[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+						[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+						$Content = $Reader.ReadToEnd()
+					}
+			
 					$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
 				}
 				catch [Exception]  {
@@ -1312,7 +1438,14 @@ Function New-HDFSItem {
 						$Result.Dispose()
 					}
 
-					Write-Warning -Message "There was an issue creating the item: $StatusCode $Reason - $Message"
+					if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+					{
+						throw "There was an issue creating the item: $StatusCode $Reason - $Message"
+					}
+					else
+					{
+						Write-Warning -Message "There was an issue creating the item: $StatusCode $Reason - $Message"
+					}
 				}
 
 				break
@@ -1342,15 +1475,25 @@ Function New-HDFSItem {
 					$Reason = $Result.StatusDescription
 				}
 				catch [System.Net.WebException] {
-					[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-					$StatusCode = [System.Int32]$Response.StatusCode
+					[System.Net.WebException]$Ex = $_.Exception
 
-					[System.IO.Stream]$Stream = $Response.GetResponseStream()
-					[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-					[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-					$Content = $Reader.ReadToEnd()
+					if ($Ex.Response -eq $null)
+					{
+						$Reason = "$($Ex.Status): $($Ex.Message)"
+						$StatusCode = 500
+					}
+					else
+					{
+						[System.Net.HttpWebResponse]$Response = $Ex.Response
+						$StatusCode = [System.Int32]$Response.StatusCode
+			
+						[System.IO.Stream]$Stream = $Response.GetResponseStream()
+						[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+						[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+						$Content = $Reader.ReadToEnd()
 
-					$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+						$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+					}
 				}
 				catch [Exception]  {
 					$Reason = $_.Exception.Message
@@ -1365,7 +1508,14 @@ Function New-HDFSItem {
 				}
 				else
 				{
-					Write-Warning -Message "There was an issue creating the item: $StatusCode $Reason - $($Result.Content)"
+					if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+					{
+						throw "There was an issue creating the item: $StatusCode $Reason - $($Result.Content)"
+					}
+					else
+					{
+						Write-Warning -Message "There was an issue creating the item: $StatusCode $Reason - $($Result.Content)"
+					}
 				}
 
 				break
@@ -1390,15 +1540,25 @@ Function New-HDFSItem {
 					$Reason = $Result.StatusDescription
 				}
 				catch [System.Net.WebException] {
-					[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-					$StatusCode = [System.Int32]$Response.StatusCode
-					
-					[System.IO.Stream]$Stream = $Response.GetResponseStream()
-					[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-					[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-					$Content = $Reader.ReadToEnd()
+					[System.Net.WebException]$Ex = $_.Exception
 
-					$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+					if ($Ex.Response -eq $null)
+					{
+						$Reason = "$($Ex.Status): $($Ex.Message)"
+						$StatusCode = 500
+					}
+					else
+					{
+						[System.Net.HttpWebResponse]$Response = $Ex.Response
+						$StatusCode = [System.Int32]$Response.StatusCode
+			
+						[System.IO.Stream]$Stream = $Response.GetResponseStream()
+						[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+						[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+						$Content = $Reader.ReadToEnd()
+
+						$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+					}
 				}
 				catch [Exception]  {
 					$Reason = $_.Exception.Message
@@ -1413,7 +1573,14 @@ Function New-HDFSItem {
 				}
 				else
 				{
-					Write-Warning -Message "There was an issue creating the item: $StatusCode $Reason - $($Result.Content)"
+					if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+					{
+						throw "There was an issue creating the item: $StatusCode $Reason - $($Result.Content)"
+					}
+					else
+					{
+						Write-Warning -Message "There was an issue creating the item: $StatusCode $Reason - $($Result.Content)"
+					}
 				}
 				break
 			}
@@ -1533,22 +1700,44 @@ Function Remove-HDFSItem {
 		}
 
 		try {
-			# Returns a boolean
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Delete -ErrorAction Stop -WebSession $SessionInfo.Session
+			$ConfirmMessage = "Are you sure you want to delete $Path`?"
 
-			$StatusCode = $Result.StatusCode
-			$Reason = $Result.StatusDescription	
+			$WhatIfDescription = "Deleted $Path"
+			$ConfirmCaption = "Delete Item"
+
+			if ($Force -or $PSCmdlet.ShouldProcess($WhatIfDescription, $ConfirmMessage, $ConfirmCaption))
+			{
+				# Returns a boolean
+				[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Delete -ErrorAction Stop -WebSession $SessionInfo.Session
+
+				$StatusCode = $Result.StatusCode
+				$Reason = $Result.StatusDescription	
+			}
+			else
+			{
+				return
+			}
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -1563,7 +1752,14 @@ Function Remove-HDFSItem {
 		}
 		else
 		{
-			Write-Warning -Message "There was an issue deleting the item: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue deleting the item: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "There was an issue deleting the item: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -1718,15 +1914,25 @@ Function Add-HDFSContent {
 			}
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -1734,7 +1940,14 @@ Function Add-HDFSContent {
 
 		if ($StatusCode -ne 200)
 		{
-			Write-Warning -Message "There was an issue appending to the item: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue appending to the item: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "There was an issue appending to the item: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -1843,15 +2056,25 @@ Function Merge-HDFSItem {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -1859,7 +2082,14 @@ Function Merge-HDFSItem {
 
 		if ($StatusCode -ne 200)
 		{
-			Write-Warning -Message "There was an issue concatenating the items: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue concatenating the items: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "There was an issue concatenating the items: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -1986,15 +2216,25 @@ Function Rename-HDFSItem {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -2009,7 +2249,14 @@ Function Rename-HDFSItem {
 		}
 		else
 		{
-			Write-Warning -Message "There was an issue renaming the item: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue renaming the item: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "There was an issue renaming the item: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -2056,7 +2303,7 @@ Function Resize-HDFSItem {
             AUTHOR: Michael Haken
 			LAST UPDATE: 11/19/2017
 	#>
-	[CmdletBinding()]
+	[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "HIGH")]
 	[OutputType()]
 	Param(
 		[Parameter(Mandatory = $true, ValueFromPipeline = $true)]
@@ -2072,6 +2319,9 @@ Function Resize-HDFSItem {
 
 		[Parameter()]
 		[Switch]$PassThru,
+
+		[Parameter()]
+		[Switch]$Force,
 
 		[Parameter()]
 		[ValidateScript({
@@ -2120,22 +2370,40 @@ Function Resize-HDFSItem {
 
 		try
 		{
-			# Returns a boolean
-			[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -MaximumRedirection 2 -ErrorAction Stop -WebSession $SessionInfo.Session
+			$ConfirmMessage = "Are you sure you want to truncate the file $Path`? You could lose data from this file."
 
-			$StatusCode = $Result.StatusCode
-			$Reason = $Result.StatusDescription	
+			$WhatIfDescription = "Truncated file $Path"
+			$ConfirmCaption = "Truncate File"
+
+			if ($Force -or $PSCmdlet.ShouldProcess($WhatIfDescription, $ConfirmMessage, $ConfirmCaption))
+			{
+				# Returns a boolean
+				[Microsoft.PowerShell.Commands.HtmlWebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -MaximumRedirection 2 -ErrorAction Stop -WebSession $SessionInfo.Session
+
+				$StatusCode = $Result.StatusCode
+				$Reason = $Result.StatusDescription
+			}
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -2150,7 +2418,14 @@ Function Resize-HDFSItem {
 		}
 		else
 		{
-			Write-Warning -Message "There was an issue truncating the item: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue truncating the item: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "There was an issue truncating the item: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -2366,15 +2641,25 @@ Function Set-HDFSItem {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -2389,7 +2674,14 @@ Function Set-HDFSItem {
 		}
 		else
 		{
-			Write-Warning -Message "There was an issue updating the item: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue updating the item: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "There was an issue updating the item: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -2555,22 +2847,44 @@ Function Set-HDFSAcl {
 
 		try
 		{
-			# No content returned
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
+			$ConfirmMessage = "Are you sure you want to set/update the ACL on $Path`?"
 
-			$StatusCode = $Result.StatusCode
-			$Reason = $Result.StatusDescription	
+			$WhatIfDescription = "Updated ACL on $Path"
+			$ConfirmCaption = "Set ACL"
+
+			if ($Force -or $PSCmdlet.ShouldProcess($WhatIfDescription, $ConfirmMessage, $ConfirmCaption))
+			{
+				# No content returned
+				[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
+
+				$StatusCode = $Result.StatusCode
+				$Reason = $Result.StatusDescription	
+			}
+			else
+			{
+				return
+			}
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -2578,7 +2892,14 @@ Function Set-HDFSAcl {
 
 		if ($StatusCode -ne 200)
 		{			
-			Write-Warning -Message "There was an issue modifying the item's ACL: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue modifying the item's ACL: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "There was an issue modifying the item's ACL: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -2691,15 +3012,25 @@ Function Get-HDFSAcl {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -2711,7 +3042,14 @@ Function Get-HDFSAcl {
 		}
 		else
 		{
-			Write-Warning -Message "There was an issue getting the acl status: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "There was an issue getting the acl status: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "There was an issue getting the acl status: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -2820,15 +3158,25 @@ Function Test-HDFSAccess {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -2986,15 +3334,25 @@ Function Get-HDFSStoragePolicy {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -3016,7 +3374,14 @@ Function Get-HDFSStoragePolicy {
 		}
 		else
 		{
-			Write-Warning -Message "The was an issue retrieving the storage policies: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue retrieving the storage policies: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue retrieving the storage policies: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -3117,22 +3482,44 @@ Function Set-HDFSStoragePolicy {
 
 		try
 		{
-			# No content returned
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
+			$ConfirmMessage = "Are you sure you want to set the storage policy on $Path`?"
 
-			$StatusCode = $Result.StatusCode
-			$Reason = $Result.StatusDescription	
+			$WhatIfDescription = "Updated storage policy on $Path"
+			$ConfirmCaption = "Set Storage Policy"
+
+			if ($Force -or $PSCmdlet.ShouldProcess($WhatIfDescription, $ConfirmMessage, $ConfirmCaption))
+			{
+				# No content returned
+				[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session
+
+				$StatusCode = $Result.StatusCode
+				$Reason = $Result.StatusDescription	
+			}
+			else
+			{
+				return
+			}
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -3140,7 +3527,14 @@ Function Set-HDFSStoragePolicy {
 
 		if ($StatusCode -ne 200)
 		{
-			Write-Warning -Message "The was an issue setting the storage policy: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue setting the storage policy: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue setting the storage policy: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -3236,22 +3630,44 @@ Function Remove-HDFSStoragePolicy {
 
 		try
 		{
-			# No content returned
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -ErrorAction Stop -WebSession $SessionInfo.Session
+			$ConfirmMessage = "Are you sure you want to delete the storage policy on $Path`?"
 
-			$StatusCode = $Result.StatusCode
-			$Reason = $Result.StatusDescription	
+			$WhatIfDescription = "Deleted storage policy on $Path"
+			$ConfirmCaption = "Delete Storage Policy"
+
+			if ($Force -or $PSCmdlet.ShouldProcess($WhatIfDescription, $ConfirmMessage, $ConfirmCaption))
+			{
+				# No content returned
+				[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Post -ErrorAction Stop -WebSession $SessionInfo.Session
+
+				$StatusCode = $Result.StatusCode
+				$Reason = $Result.StatusDescription	
+			}
+			else
+			{
+				return
+			}
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -3259,7 +3675,14 @@ Function Remove-HDFSStoragePolicy {
 
 		if ($StatusCode -ne 200)
 		{
-			Write-Warning -Message "The was an issue unsetting the storage policy: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue unsetting the storage policy: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue unsetting the storage policy: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -3390,15 +3813,25 @@ Function Get-HDFSFileBlockLocations {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -3410,7 +3843,14 @@ Function Get-HDFSFileBlockLocations {
 		}
 		else
 		{
-			Write-Warning -Message "The was an issue getting the file block locations: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue getting the file block locations: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue getting the file block locations: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -3565,15 +4005,25 @@ Function Get-HDFSXAttr {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -3597,7 +4047,14 @@ Function Get-HDFSXAttr {
 		}
 		else
 		{
-			Write-Warning -Message "The was an issue getting the extended attribute: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue getting the extended attribute: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue getting the extended attribute: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -3728,15 +4185,25 @@ Function Set-HDFSXAttr {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -3744,7 +4211,14 @@ Function Set-HDFSXAttr {
 
 		if ($StatusCode -ne 200)
 		{
-			Write-Warning -Message "The was an issue setting the extended attribute: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue setting the extended attribute: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue setting the extended attribute: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -3854,15 +4328,25 @@ Function Remove-HDFSXAttr {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -3870,7 +4354,14 @@ Function Remove-HDFSXAttr {
 
 		if ($StatusCode -ne 200)
 		{
-			Write-Warning -Message "The was an issue removing the extended attribute: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue removing the extended attribute: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue removing the extended attribute: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -3985,15 +4476,25 @@ Function New-HDFSSnapshot {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -4005,7 +4506,14 @@ Function New-HDFSSnapshot {
 		}
 		else
 		{
-			Write-Warning -Message "The was an issue creating the snapshot: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue creating the snapshot: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue creating the snapshot: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -4048,7 +4556,7 @@ Function Remove-HDFSSnapshot {
             AUTHOR: Michael Haken
 			LAST UPDATE: 11/19/2017
 	#>
-	[CmdletBinding()]
+	[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = "HIGH")]
 	[OutputType()]
 	Param(
 		[Parameter(Mandatory = $true)]
@@ -4059,6 +4567,9 @@ Function Remove-HDFSSnapshot {
 		[Parameter(Mandatory = $true)]
 		[ValidateNotNullOrEmpty()]
 		[System.String]$Name,
+
+		[Parameter()]
+		[Switch]$Force,
 
 		[Parameter()]
 		[ValidateScript({
@@ -4107,22 +4618,44 @@ Function Remove-HDFSSnapshot {
 
 		try
 		{
-			# No content returned
-			[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Delete -ErrorAction Stop -WebSession $SessionInfo.Session
+			$ConfirmMessage = "Are you sure you want to delete the snapshot $Name on $Path`?"
 
-			$StatusCode = $Result.StatusCode
-			$Reason = $Result.StatusDescription	
+			$WhatIfDescription = "Deleted snapshot $Name on $Path"
+			$ConfirmCaption = "Delete Snapshot"
+
+			if ($Force -or $PSCmdlet.ShouldProcess($WhatIfDescription, $ConfirmMessage, $ConfirmCaption))
+			{
+				# No content returned
+				[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Uri -Method Delete -ErrorAction Stop -WebSession $SessionInfo.Session
+
+				$StatusCode = $Result.StatusCode
+				$Reason = $Result.StatusDescription	
+			}
+			else
+			{
+				return
+			}
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -4130,7 +4663,14 @@ Function Remove-HDFSSnapshot {
 
 		if ($StatusCode -ne 200)
 		{
-			Write-Warning -Message "The was an issue deleting the snapshot: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue deleting the snapshot: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue deleting the snapshot: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -4246,15 +4786,25 @@ Function Rename-HDFSSnapshot {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -4262,7 +4812,14 @@ Function Rename-HDFSSnapshot {
 
 		if ($StatusCode -ne 200)
 		{
-			Write-Warning -Message "The was an issue renaming the snapshot: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue renaming the snapshot: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue renaming the snapshot: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -4365,15 +4922,25 @@ Function Get-HDFSDelegationToken {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -4385,7 +4952,14 @@ Function Get-HDFSDelegationToken {
 		}
 		else
 		{
-			Write-Warning -Message "The was an issue getting the delegation token: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue getting the delegation token: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue getting the delegation token: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -4471,15 +5045,25 @@ Function Update-HDFSDelegationToken {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -4494,7 +5078,14 @@ Function Update-HDFSDelegationToken {
 		}
 		else
 		{
-			Write-Warning -Message "The was an issue getting the delegation token: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue renewing the delegation token: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue renewing the delegation token: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
@@ -4574,15 +5165,25 @@ Function Revoke-HDFSDelegationToken {
 			$Reason = $Result.StatusDescription	
 		}
 		catch [System.Net.WebException] {
-			[System.Net.HttpWebResponse]$Response = $_.Exception.Response
-			$StatusCode = [System.Int32]$Response.StatusCode
-			
-			[System.IO.Stream]$Stream = $Response.GetResponseStream()
-			[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
-			[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
-			$Content = $Reader.ReadToEnd()
+			[System.Net.WebException]$Ex = $_.Exception
 
-			$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			if ($Ex.Response -eq $null)
+			{
+				$Reason = "$($Ex.Status): $($Ex.Message)"
+				$StatusCode = 500
+			}
+			else
+			{
+				[System.Net.HttpWebResponse]$Response = $Ex.Response
+				$StatusCode = [System.Int32]$Response.StatusCode
+			
+				[System.IO.Stream]$Stream = $Response.GetResponseStream()
+				[System.Text.Encoding]$Encoding = [System.Text.Encoding]::GetEncoding("utf-8")
+				[System.IO.StreamReader]$Reader = New-Object -TypeName System.IO.StreamReader($Stream, $Encoding)
+				$Content = $Reader.ReadToEnd()
+
+				$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
+			}
 		}
 		catch [Exception]  {
 			$Reason = $_.Exception.Message
@@ -4590,7 +5191,14 @@ Function Revoke-HDFSDelegationToken {
 
 		if ($StatusCode -ne 200)
 		{
-			Write-Warning -Message "The was an issue cancelling the delegation token: $StatusCode $Reason - $($Result.Content)"
+			if ($ErrorActionPreference -eq [System.Management.Automation.ActionPreference]::Stop)
+			{
+				throw "The was an issue cancelling the delegation token: $StatusCode $Reason - $($Result.Content)"
+			}
+			else
+			{
+				Write-Warning -Message "The was an issue cancelling the delegation token: $StatusCode $Reason - $($Result.Content)"
+			}
 		}
 	}
 
