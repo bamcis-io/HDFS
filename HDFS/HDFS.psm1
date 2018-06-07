@@ -1191,6 +1191,12 @@ Function New-HDFSItem {
 		.DESCRIPTION
 			This cmdlet creates a new HDFS file with the provided content, an HDFS directory, or a symbollic link.
 
+			When creating a file, you may either specify an input file or you can pass a primitive value, a string,
+			an array of primitives, or an array of strings. For any of these options, the content will be written
+			to the file as is. You may also provide an object to -InputObject and it will be serialized into JSON and
+			then sent to HDFS. If you want to control how the data is serialized and stored, it is best to either convert
+			it to a string, a byte array, or save it to a file and provide that to -InputFile.
+
 		.PARAMETER Path
 			The path to the item. This can be blank and doesn't need to be prefaced with a '/', but can be. If either
 			InputObject or InputFile is specified, this is interpreted to be a literal file path and will not test
@@ -1375,65 +1381,80 @@ Function New-HDFSItem {
 				}
 
 				try {
+					
 					# WebHDFS uses a two part process to create a file, the redirect provides the datanode via the location header
 					# where the client will send the data to create the file
-					[Microsoft.PowerShell.Commands.WebResponseObject]$RedirectResult = Invoke-WebRequest -Uri $Uri -Method Put -MaximumRedirection 0 -ErrorAction Stop -WebSession $SessionInfo.Session
-			
-					if ($RedirectResult.StatusCode -eq 307)
+					try {
+						[Microsoft.PowerShell.Commands.WebResponseObject]$RedirectResult = Invoke-WebRequest -Uri $Uri -Method Put -MaximumRedirection 0 -WebSession $SessionInfo.Session
+
+						# This shouldn't happen, bad hack to have to rely on exception handling
+						# for flow control
+						$StatusCode = $RedirectResult.StatusCode
+						$Reason = "The first request should return a 307, not $($RedirectResult.StatusDescription)"
+						$Message = $RedirectResult.Content
+					}
+					catch [Microsoft.PowerShell.Commands.HttpResponseException] 
 					{
-						$Location = $RedirectResult.Headers["Location"]
-
-						Write-Verbose -Message "Redirect location: $Location"
-
-						if ($PSCmdlet.ParameterSetName -eq "InputObject")
+						# We're expecting to catch an exception, since the default
+						# action on Invoke-WebRequest is to throw a terminating error
+						# when it doesn't receive a 200-299 response
+						[System.Net.Http.HttpResponseMessage]$Response = $_.Exception.Response
+	
+						if ($Response.StatusCode -eq 307)
 						{
-							$ContentSplat = @{}
+							$Location = $Response.Headers.GetValues("Location")[0]
 
-							# If it's a primitive type, string, or array of primitives or strings, send that data as is,
-							# otherwise, convert the object to a JSON string and send that
-							if ($InputObject.GetType().IsPrimitive -or 
-								($InputObject.GetType().IsArray -and ($InputObject.GetType().GetElementType().IsPrimitive -or $InputObject.GetType().GetElementType() -eq [System.String[]])) -or 
-								$InputObject.GetType() -eq [System.String])
-							{
-								$ContentSplat.Add("Body", $InputObject)
-							}
-							else
-							{
-								$ContentSplat.Add("Body", (ConvertTo-Json -InputObject $InputObject))
-							}
+							Write-Verbose -Message "Redirect location: $Location"
 
-							# No content returned
-							[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session	@ContentSplat
-
-							$StatusCode = $Result.StatusCode
-							$Reason = $Result.StatusDescription
-						}
-						else # Otherwise a file path was provided
-						{
-							if (Test-Path -Path $InputFile)
+							if ($PSCmdlet.ParameterSetName -eq "InputObject")
 							{
-								[System.Byte[]]$Bytes = Get-Content -Path $InputFile -Encoding Byte -Raw 
+								$ContentSplat = @{}
+
+								# If it's a primitive type, string, or array of primitives or strings, send that data as is,
+								# otherwise, convert the object to a JSON string and send that
+								if ($InputObject.GetType().IsPrimitive -or 
+									($InputObject.GetType().IsArray -and ($InputObject.GetType().GetElementType().IsPrimitive -or $InputObject.GetType().GetElementType() -eq [System.String[]])) -or 
+									$InputObject.GetType() -eq [System.String])
+								{
+									$ContentSplat.Add("Body", $InputObject)
+								}
+								else
+								{
+									$ContentSplat.Add("Body", (ConvertTo-Json -InputObject $InputObject))
+								}
 
 								# No content returned
-								[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session -ContentType "application/octet-stream" -Body $Bytes
+								[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session @ContentSplat
 
 								$StatusCode = $Result.StatusCode
 								$Reason = $Result.StatusDescription
 							}
-							else
+							else # Otherwise a file path was provided
 							{
-								$StatusCode = 404
-								$Reason = "The file $InputFile could not be found."
+								if (Test-Path -Path $InputFile)
+								{
+									# No content returned
+									[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session -InFile $InputFile
+
+									$StatusCode = $Result.StatusCode
+									$Reason = $Result.StatusDescription
+								}
+								else
+								{
+									$StatusCode = 404
+									$Reason = "The file $InputFile could not be found."
+								}
 							}
 						}
-					}
-					else
-					{
-						$StatusCode = $RedirectResult.StatusCode
-						$Reason = $RedirectResult.StatusDescription
+						else
+						{
+							$StatusCode = $Response.StatusCode
+							$Reason = $Response.StatusDescription
+						}
 					}
 				}
 				catch [System.Net.WebException] {
+					Write-Host "Caught Exception"
 					[System.Net.WebException]$Ex = $_.Exception
 
 					if ($Ex.Response -eq $null)
@@ -1455,7 +1476,9 @@ Function New-HDFSItem {
 					$Reason = "$($Response.StatusDescription) $($_.Exception.Message)`r`n$Content"
 				}
 				catch [Exception]  {
+					Write-Host "Caught Generic Exception"
 					$Reason = $_.Exception.Message
+					Write-Host $Reason
 				}
 
 				if ($StatusCode -ne 201)
@@ -4877,7 +4900,7 @@ Function Get-HDFSDelegationToken {
 			The renewer of the delegation token.
 
 		.PARAMETER Kind
-			A string that represents token kind e.g “HDFS_DELEGATION_TOKEN” or “WEBHDFS delegation”.
+			A string that represents token kind e.g ?HDFS_DELEGATION_TOKEN? or ?WEBHDFS delegation?.
 
 		.PARAMETER Service
 			The name of the service where the token is supposed to be used, e.g. ip:port of the namenode.

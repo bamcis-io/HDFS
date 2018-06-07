@@ -74,6 +74,9 @@ Gets the current home directory.
 
 ## Revision History
 
+### 1.0.0.3
+Changed file input process with New-HDFSItem.
+
 ### 1.0.0.2
 Added the ability to send file content to HDFS with New-HDFSItem
 
