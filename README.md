@@ -1,5 +1,13 @@
 # HDFS
 
+## Table of Contents
+- [Information](#information)
+- [Usage](#usage)
+	* [Sessions](#setup-a-session)
+	* [File System Operations](#file-system-operations)
+	* [Extended Attributes](#extended-attribute-cmdlets)
+- [Revision History](#revision-history)
+
 ## Information
 The cmdlets have been written and tested against Hadoop version 2.8.1, but include all API calls defined in version 2.9.0. They have not been configured or tested to support Kerberos authentication, but allow you to specify a base64 encoded string for the NEGOTIATE authorization header.
 
@@ -36,6 +44,10 @@ Sets the permissions for /test to 777.
 
 Creates a new file with the content of TESTING.
 
+	New-HDFSItem -PAth "/backups/sql.bak" -InputFile c:\backups\sql1.bak
+
+Creates a new file with the content in c:\backups\sql1.bak in the HDFS path /backups/sql.bak
+
     Get-HDFSContent -Path "/test/test.txt" -Encoding ([System.Text.Encoding]::UTF8)
 
 Retrieves the content of the test.txt file and encodes the byte stream as UTF8.
@@ -61,6 +73,9 @@ Gets the current home directory.
     Remove-HDFSXAttr -Path "" -Name "user.test"
 
 ## Revision History
+
+### 1.0.0.2
+Added the ability to send file content to HDFS with New-HDFSItem
 
 ### 1.0.0.1
 Improved error handling. Added -Confirm and -Force functionality where applicable.

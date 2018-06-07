@@ -1192,10 +1192,15 @@ Function New-HDFSItem {
 			This cmdlet creates a new HDFS file with the provided content, an HDFS directory, or a symbollic link.
 
 		.PARAMETER Path
-			The path to the item. This can be blank and doesn't need to be prefaced with a '/', but can be.
+			The path to the item. This can be blank and doesn't need to be prefaced with a '/', but can be. If either
+			InputObject or InputFile is specified, this is interpreted to be a literal file path and will not test
+			that the path is a directory and use the filename of the source file.
 
 		.PARAMETER InputObject
 			The content to be written to the new HDFS file. If the item type is a directory, this parameter is ignored.
+
+		.PARAMETER InputFile
+			The source file that will be written to the new HDFS file.
 
 		.PARAMETER Overwrite
 			If this is specified, if the specified path already exists, it will be overwritten.
@@ -1254,9 +1259,16 @@ Function New-HDFSItem {
 		})]
 		[System.String]$Path,
 
-		[Parameter(ValueFromPipeline = $true)]
+		[Parameter(ValueFromPipeline = $true, ParameterSetName = "InputObject")]
 		[ValidateNotNull()]
 		[System.Object]$InputObject,
+
+		[Parameter(ParameterSetName = "InputFile", Mandatory = $true)]
+		[ValidateNotNullOrEmpty()]
+		[ValidateScript({
+			Test-Path -Path $_
+		})]
+		[System.String]$InputFile,
 
 		[Parameter()]
 		[Switch]$Overwrite,
@@ -1277,7 +1289,7 @@ Function New-HDFSItem {
 		[ValidateRange(1, [System.Int32]::MaxValue)]
 		[System.Int32]$BufferSize,
 
-		[Parameter()]
+		[Parameter(ParameterSetName = "InputObject")]
 		[ValidateSet("File", "Directory", "SymbolicLink")]
 		[System.String]$ItemType = "File",
 
@@ -1316,6 +1328,11 @@ Function New-HDFSItem {
 			{
 				$Path = [System.String]::Empty
 			}
+		}
+
+		if ($PSCmdlet.ParameterSetName -eq "InputFile")
+		{
+			$ItemType = "File"
 		}
 
 		switch ($ItemType)
@@ -1368,26 +1385,47 @@ Function New-HDFSItem {
 
 						Write-Verbose -Message "Redirect location: $Location"
 
-						$ContentSplat = @{}
-
-						# If it's a primitive type, string, or array of primitives or strings, send that data as is,
-						# otherwise, convert the object to a JSON string and send that
-						if ($InputObject.GetType().IsPrimitive -or 
-							($InputObject.GetType().IsArray -and ($InputObject.GetType().GetElementType().IsPrimitive -or $InputObject.GetType().GetElementType() -eq [System.String[]])) -or 
-							$InputObject.GetType() -eq [System.String])
+						if ($PSCmdlet.ParameterSetName -eq "InputObject")
 						{
-							$ContentSplat.Add("Body", $InputObject)
+							$ContentSplat = @{}
+
+							# If it's a primitive type, string, or array of primitives or strings, send that data as is,
+							# otherwise, convert the object to a JSON string and send that
+							if ($InputObject.GetType().IsPrimitive -or 
+								($InputObject.GetType().IsArray -and ($InputObject.GetType().GetElementType().IsPrimitive -or $InputObject.GetType().GetElementType() -eq [System.String[]])) -or 
+								$InputObject.GetType() -eq [System.String])
+							{
+								$ContentSplat.Add("Body", $InputObject)
+							}
+							else
+							{
+								$ContentSplat.Add("Body", (ConvertTo-Json -InputObject $InputObject))
+							}
+
+							# No content returned
+							[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session	@ContentSplat
+
+							$StatusCode = $Result.StatusCode
+							$Reason = $Result.StatusDescription
 						}
-						else
+						else # Otherwise a file path was provided
 						{
-							$ContentSplat.Add("Body", (ConvertTo-Json -InputObject $InputObject))
+							if (Test-Path -Path $InputFile)
+							{
+								[System.Byte[]]$Bytes = Get-Content -Path $InputFile -Encoding Byte -Raw 
+
+								# No content returned
+								[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session -ContentType "application/octet-stream" -Body $Bytes
+
+								$StatusCode = $Result.StatusCode
+								$Reason = $Result.StatusDescription
+							}
+							else
+							{
+								$StatusCode = 404
+								$Reason = "The file $InputFile could not be found."
+							}
 						}
-
-						# No content returned
-						[Microsoft.PowerShell.Commands.WebResponseObject]$Result = Invoke-WebRequest -Uri $Location -Method Put -ErrorAction Stop -WebSession $SessionInfo.Session	@ContentSplat
-
-						$StatusCode = $Result.StatusCode
-						$Reason = $Result.StatusDescription
 					}
 					else
 					{
