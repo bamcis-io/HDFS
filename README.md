@@ -86,6 +86,9 @@ Gets the current home directory.
 
 ## Revision History
 
+### 1.0.0.4
+Added ability to use a PSCredential object for authentication.
+
 ### 1.0.0.3
 Changed file input process with New-HDFSItem.
 
