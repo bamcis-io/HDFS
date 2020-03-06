@@ -34,6 +34,9 @@ Function New-HDFSSession {
 
 			THIS PARAMETER HAS NOT BEEN TESTED.
 
+		.PARAMETER Credentials
+			A PSCredential object to use  for authentication.
+
 		.PARAMETER UseSsl
 			Specify to use HTTPS connections.
 
@@ -86,6 +89,10 @@ Function New-HDFSSession {
 		[Parameter(ParameterSetName = "Kerberos")]
 		[ValidateNotNullOrEmpty()]
 		[System.String]$KerberosCredentials,
+
+		[Parameter(ParameterSetName = "Credentials")]
+		[ValidateNotNullOrEmpty()]
+		[pscredential]$Credentials,
 
 		[Parameter()]
 		[Switch]$UseSsl,
@@ -142,6 +149,10 @@ Function New-HDFSSession {
 				}
 				"Kerberos" {
 					$script:Sessions.Get_Item($Namenode).Session.Headers.Add("Authorization: NEGOTIATE $KerberosCredentials")
+					break
+				}
+				"Credentials" {
+					$script:Sessions.Get_Item($Namenode).Session.Credentials = $credentials
 					break
 				}
 			}
