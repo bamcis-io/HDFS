@@ -10,6 +10,7 @@
 
 ## Information
 The cmdlets have been written and tested against Hadoop version 2.8.1, but include all API calls defined in version 2.9.0. They have not been configured or tested to support Kerberos authentication, but allow you to specify a base64 encoded string for the NEGOTIATE authorization header.
+It is possible to authenticate using Kerberos using the -credentials argument - this has been tested on a secured Cloudera CDH 5 cluster.
 
 ## Usage
 
@@ -21,6 +22,17 @@ All cmdlets by default will execute Write-Warning when an error is encountered. 
 
     Import-Module -Name HDFS
     New-HDFSSession -Namenode 192.168.1.2 -Username hdadmin
+
+### Setup a secured session
+
+Note you may need to force use of TLS1.2 in a secured environment - this command forces all Invoke-WebRequest calls in this PowerShell session to use TLS1.2 so be aware might interfere with other scripts.
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+Now we can establish a session with our secured CDH platform, using SSL and Kerberos.
+
+    Import-Module -Name HDFS
+    New-HDFSSession -Namenode cdhnode -Port 14000 -UseSSL -Credentials (Get-Credential)
 
 ### File System Operations
 
