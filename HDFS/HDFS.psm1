@@ -29,8 +29,11 @@ Function New-HDFSSession {
 		.PARAMETER DelegationToken
 			The delegation token to use during transactions.
 
-		.PARAMETER KerberosCredentials
-			The Base64 encoded credentials to use with kerberos authentication. This string is supplied in the NEGOTIATE authorization header. 
+		.PARAMETER Credential
+			A PSCredential object to be used for Kerberos SPNEGO authentication. This parameter is preferred over the SPNEGOToken.
+
+		.PARAMETER SPNEGOToken
+			A base64 encoded SPNEGO token that will be supplied in the Authorization header for NEGOTIATE authentication. This is an alternative to supplying a PSCredential for Kerberos authentication, but is less preferred than using the Credential parameter.
 
 			THIS PARAMETER HAS NOT BEEN TESTED.
 
@@ -83,9 +86,14 @@ Function New-HDFSSession {
 		[ValidateNotNullOrEmpty()]
 		[System.String]$DelegationToken = [System.String]::Empty,
 
-		[Parameter(ParameterSetName = "Kerberos")]
+		[Parameter(ParameterSetName = "Credential")]
+		[ValidateNotNull()]	
+		[System.Management.Automation.Credential()]
+		[System.Management.Automation.PSCredential]$Credential = [System.Management.Automation.PSCredential]::Empty,
+
+		[Parameter(ParameterSetName = "SPNEGO")]
 		[ValidateNotNullOrEmpty()]
-		[System.String]$KerberosCredentials,
+		[System.String]$SPNEGOToken,
 
 		[Parameter()]
 		[Switch]$UseSsl,
@@ -140,8 +148,12 @@ Function New-HDFSSession {
 					$Uri += "&delegation=$DelegationToken"
 					break
 				}
-				"Kerberos" {
-					$script:Sessions.Get_Item($Namenode).Session.Headers.Add("Authorization: NEGOTIATE $KerberosCredentials")
+				"Credential" {
+					$script:Sessions.Get_Item($Namenode).Session.Credentials = $Credential
+					break
+				}
+				"SPNEGO" {
+					$script:Sessions.Get_Item($Namenode).Session.Headers.Add("Authorization", "NEGOTIATE $SPNEGOToken")
 					break
 				}
 			}
