@@ -7,6 +7,9 @@
     <RootNamespace>MyApplication</RootNamespace>
     <AssemblyName>MyApplication</AssemblyName>
     <Name>HDFS</Name>
+    <PackageEntryPoint>HDFS.tests.ps1</PackageEntryPoint>
+    <DotNetVersion>v4.7.2</DotNetVersion>
+    <PackageType>Console</PackageType>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
